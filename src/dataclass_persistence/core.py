@@ -3,15 +3,12 @@ import logging
 import zipfile
 from dataclasses import dataclass, is_dataclass, fields
 from pathlib import Path
-from typing import Tuple, Dict, Union, Type, TypeVar
+from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
 import numpy as np
 
 
-
-
-
-def write_string_to_file(data_str: str, file, b_logging: bool=True):
+def write_string_to_file(data_str: str, file, b_logging: bool = True):
     """
 
     :param file:
@@ -139,6 +136,8 @@ def create_instance_from_data_dict(type_instance,
         kwargs = {}
         _fields = [(data_dict[_field.name], _field) for _field in fields(type_instance) if _field.name in data_dict]
         for _value, _field in _fields:
+            if isinstance(_field.type, str):
+                _field.type = get_type_hints(type_instance)[_field.name]
             if _field.init is False:
                 pass
             elif 'private' in _field.metadata and _field.metadata['private'] or \
@@ -172,6 +171,7 @@ def create_instance_from_data_dict(type_instance,
         return np.array(rec.data, dtype=rec.dtype)
     elif type_instance in built_in_types:
         return data_dict
+
 
 # import h5py
 # def numpy_dict_to_hdf5_file(file, dict_heavy):
