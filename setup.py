@@ -21,8 +21,8 @@ DESCRIPTION = 'This package enables to persist information stored in dataclasses
 URL = 'https://github.com/piveloper/dataclass-persistence'
 EMAIL = 'piveloper@gmail.com'
 AUTHOR = 'piveloper'
-REQUIRES_PYTHON = '>=3.7.0'
-VERSION = '0.0.8'
+REQUIRES_PYTHON = '>=3.8.0'
+VERSION = '0.0.9'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
@@ -34,7 +34,8 @@ EXTRAS = {
     'dev': [
         'pytest',
         'check-manifest',
-        'twine'
+        'twine',
+        'wheel'
     ]  # 'fancy feature': ['django'],
 }
 
@@ -86,9 +87,13 @@ class LocalCommand(Command):
         try:
             self.status('Removing previous builds…')
             rmtree(os.path.join(here, 'dist'))
+        except OSError as err:
+            pass
+        try:
+            self.status('Removing builds/lib to get rid os obsolete files...')
+            rmtree(os.path.join(here, 'build/lib'))
         except OSError:
             pass
-
         self.status('Building Source and Wheel distribution…')
         os.system(f'{sys.executable} setup.py sdist bdist_wheel')
 
@@ -116,6 +121,7 @@ class UploadCommand(LocalCommand):
             os.system('git push --tags')
         sys.exit()
 
+
 # Where the magic happens:
 setup(
     name=NAME,
@@ -127,8 +133,7 @@ setup(
     author_email=EMAIL,
     python_requires=REQUIRES_PYTHON,
     url=URL,
-    package_dir={'': 'src'},
-    packages=find_packages(where='src', exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
+    packages=find_packages(exclude=["examples", "tests", "*.tests", "*.tests.*", "tests.*"]),
     # If your package is a single module, use this instead of 'packages':
     # py_modules=['mypackage'],
 
@@ -144,7 +149,7 @@ setup(
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: Implementation :: CPython',
         'Programming Language :: Python :: Implementation :: PyPy'
     ],
