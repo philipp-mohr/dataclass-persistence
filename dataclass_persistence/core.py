@@ -167,8 +167,7 @@ def create_instance_from_data_dict(type_instance,
                     return create_instance_from_data_dict(arg, data_dict)
             raise ValueError('specific type not found in given Union type')
     elif type_instance in [np.ndarray, np.array]:
-        rec = NumpyJson(**data_dict)
-        return np.array(rec.data, dtype=rec.dtype)
+        return data_dict
     elif type_instance in built_in_types:
         return data_dict
 
@@ -263,7 +262,10 @@ class MyJsonEncoder(json.JSONEncoder):
 def my_decoder(dct):
     if '_cplx_' in dct:
         return complex(dct['_cplx_'])
-    return dct
+    elif 'data' and 'dtype' in dct:
+        return np.array(dct['data'], dtype=dct['dtype'])
+    else:
+        return dct
 
 
 def add_suffix(file: Path, suffix: str):
@@ -281,6 +283,29 @@ def add_suffix(file: Path, suffix: str):
     return file.with_name(f'{file.name}{suffix}')
 
 
+def create_json_from_instance(instance):
+    dict_light, dict_heavy = create_light_and_heavy_part_from_instance(instance)
+    json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
+    replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
+                    for key, value in dict_heavy.items()}
+    json_light = replace_all(json_light, replacements)
+    return json_light
+
+
+def store(instance, file=None):
+    file = Path(file)
+    json_light = create_json_from_instance(instance)
+    dict_files = {file.name + '.json': json_light}
+    store_files_to_zip(file, dict_files)
+
+
+def load(file):
+    file = Path(file)
+    with zipfile.ZipFile(add_suffix(file, '.zip'), 'r') as zipped_f:
+        dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
+    return dict_data[0]
+
+
 class PersistentDataclass:
     @staticmethod
     def _deal_with_file(file: Union[Path, str]) -> Path:
@@ -293,11 +318,7 @@ class PersistentDataclass:
         return file.name  # file.stem
 
     def _create_single_json_file_where_heavy_part_has_no_indent(self) -> str:
-        dict_light, dict_heavy = create_light_and_heavy_part_from_instance(self)
-        json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
-        replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
-                        for key, value in dict_heavy.items()}
-        json_light = replace_all(json_light, replacements)
+        json_light = create_json_from_instance(self)
         return json_light
 
     def store_to_disk_compressed_including_single_json_file(self, file):
@@ -338,9 +359,8 @@ class PersistentDataclass:
 
     @classmethod
     def _load_from_disk_compressed(cls, file) -> T:
-        with zipfile.ZipFile(add_suffix(file, '.zip'), 'r') as zipped_f:
-            dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
-        return create_instance_from_data_dict(cls, dict_data[0])
+        dict_data = load(file)
+        return create_instance_from_data_dict(cls, dict_data)
 
     @classmethod
     def load_from_disk(cls: Type[T], file) -> T:
