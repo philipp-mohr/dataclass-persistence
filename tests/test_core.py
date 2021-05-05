@@ -7,6 +7,7 @@ from typing import Union, Dict, List, Tuple
 from dataclass_persistence import PersistentDataclass
 from pytest import fixture, mark
 
+
 # some example scenario, where simulation data like configuration and results are stored in nested hierarchy
 
 
@@ -143,10 +144,11 @@ class ClassWithUnions(PersistentDataclass):
     param_b: Union[float, str] = 1.0
     param_c: Union[ConfigSomeComponentA, ConfigSomeComponentB] = ConfigSomeComponentA()
 
+
 def test_dataclass_with_union(file_dir):
     ref = ClassWithUnions()
-    ref.store_to_disk(file_dir.joinpath('file_with_unions'))
-    res = ClassWithUnions.load_from_disk(file_dir.joinpath('file_with_unions'))
+    ref.store(file_dir.joinpath('file_with_unions'))
+    res = ClassWithUnions.load(file_dir.joinpath('file_with_unions'))
     assert ref.param_a == res.param_a
     assert ref.param_b == res.param_b
     assert ref.param_c.param_a == res.param_c.param_a

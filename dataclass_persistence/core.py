@@ -350,6 +350,9 @@ class PersistentDataclass:
         """
         self.store_to_disk_compressed_including_single_json_file(file)
 
+    def store(self, file):
+        self.store_to_disk(file)
+
     @classmethod
     def _load_from_disk_uncompressed(cls, file: Path) -> T:
         with open(str(add_suffix(file, '.json')), 'r') as data_file:
@@ -374,3 +377,7 @@ class PersistentDataclass:
             return cls._load_from_disk_compressed(file)
         else:
             raise FileNotFoundError('No file with supported type found')
+
+    @classmethod
+    def load(cls: Type[T], file) -> T:
+        return cls.load_from_disk(file)
