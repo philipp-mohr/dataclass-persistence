@@ -154,6 +154,21 @@ def test_dataclass_with_union(file_dir):
     assert ref.param_c.param_a == res.param_c.param_a
     assert ref.param_d.param_a == res.param_d.param_a
 
+
+def test_dataclass_same_name_different_directory():
+    from tests.data.a import SomeCls as SomeClsA
+    from tests.data.b import SomeCls as SomeClsB
+
+    @dataclass
+    class SomeCls(PersistentDataclass):
+        data: Union[SomeClsA, SomeClsB] = None
+
+    file = 'cache/class_same_name_differnt_dir'
+    some_cls = SomeCls(SomeClsB('3'))
+    some_cls.store(file)
+    some_cls_loaded = SomeCls.load_from_disk(file)
+    assert hasattr(some_cls_loaded.data, 'valb')
+
 # from simcomm.helpers.shared_memory_tools import IntegerSharedMemory
 # @dataclass
 # class SmData(PersistentDataclass):

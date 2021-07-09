@@ -96,9 +96,9 @@ def create_light_and_heavy_part_from_instance(instance,
                                                                                      _field.name)[0]
                 if hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union:
                     if is_dataclass(value):
-                        json_object[_field.name]['type'] = type(value).__name__
+                        json_object[_field.name]['type'] = f'{type(value).__module__}.{type(value).__name__}'
                     elif type(value) in built_in_types:
-                        json_object[_field.name] = {'type': type(value).__name__,
+                        json_object[_field.name] = {'type': str(type(value).__name__),
                                                     'value': json_object[_field.name]}
         return json_object, dict_heavy
     elif type(instance) == tuple:
@@ -163,7 +163,7 @@ def create_instance_from_data_dict(type_instance,
             for arg in type_instance.__args__:
                 if data_dict['type'] in built_in_types_names:
                     return create_instance_from_data_dict(arg, data_dict['value'])
-                elif data_dict['type'] in str(arg).split('.')[-1]:
+                elif data_dict['type'] in str(f'{arg.__module__}.{arg.__name__}'):
                     return create_instance_from_data_dict(arg, data_dict)
             raise ValueError('specific type not found in given Union type')
     elif type_instance in [np.ndarray, np.array]:
