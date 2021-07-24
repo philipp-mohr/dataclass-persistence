@@ -132,3 +132,4 @@ dmypy.json
 # others
 /tests/cache/
 /examples/my_file.zip
+cache

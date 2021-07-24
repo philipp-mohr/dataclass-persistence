@@ -7,6 +7,13 @@ from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
 import numpy as np
 
+# excludes the field from being stored to file
+# e.g. var_a: str = field(metadata=EXCLUDE)
+# add other meta data through dictionary union operator:
+# e.g. var_a: str = field(metadata=EXCLUDE|{'other_metakey': some_val})
+EXCLUDE_KEY = 'exclude'
+EXCLUDE = {EXCLUDE_KEY: True}
+
 
 def write_string_to_file(data_str: str, file, b_logging: bool = True):
     """
@@ -87,8 +94,7 @@ def create_light_and_heavy_part_from_instance(instance,
     if is_dataclass(instance):
         _fields = [(getattr(instance, _field.name), _field) for _field in fields(instance)]
         for value, _field in _fields:
-            if 'private' in _field.metadata and _field.metadata['private'] or \
-                    'serializable' in _field.metadata and not _field.metadata['serializable']:
+            if _field.metadata.get(EXCLUDE_KEY, False):
                 json_object[_field.name] = None
             else:
                 json_object[_field.name] = create_light_and_heavy_part_from_instance(value,
@@ -140,8 +146,7 @@ def create_instance_from_data_dict(type_instance,
                 _field.type = get_type_hints(type_instance)[_field.name]
             if _field.init is False:
                 pass
-            elif 'private' in _field.metadata and _field.metadata['private'] or \
-                    'serializable' in _field.metadata and not _field.metadata['serializable']:
+            elif _field.metadata.get(EXCLUDE_KEY, False):
                 kwargs[_field.name] = None
             elif _value is None:
                 kwargs[_field.name] = None
@@ -306,7 +311,17 @@ def load(file):
     return dict_data[0]
 
 
-class PersistentDataclass:
+def _replace_not_excluded_fields(old, new):
+    for key, val in old.__dataclass_fields__.items():
+        if is_dataclass(old.__getattribute__(key)):
+            if not val.metadata.get(EXCLUDE_KEY, False):
+                _replace_not_excluded_fields(old.__getattribute__(key), new.__getattribute__(key))
+        else:
+            if not val.metadata.get(EXCLUDE_KEY, False):
+                old.__setattr__(key, new.__getattribute__(key))
+
+
+class Persistent:  # on difference between persitable and persistent: https://wikidiff.com/persistent/persistable
     @staticmethod
     def _deal_with_file(file: Union[Path, str]) -> Path:
         if not isinstance(file, Path):
@@ -317,14 +332,14 @@ class PersistentDataclass:
     def _extract_file_name(file: Path) -> str:
         return file.name  # file.stem
 
-    def _create_single_json_file_where_heavy_part_has_no_indent(self) -> str:
+    def to_json(self) -> str:
         json_light = create_json_from_instance(self)
         return json_light
 
     def store_to_disk_compressed_including_single_json_file(self, file):
         # todo remove uncompressed file if exists
         file = self._deal_with_file(file)
-        json_light = self._create_single_json_file_where_heavy_part_has_no_indent()
+        json_light = self.to_json()
         dict_files = {self._extract_file_name(file) + '.json': json_light}
         store_files_to_zip(file, dict_files)
 
@@ -338,7 +353,7 @@ class PersistentDataclass:
     #     store_files_to_zip(file, dict_files)
 
     def store_to_disk_uncompressed_single_json_file(self, file):
-        json_light = self._create_single_json_file_where_heavy_part_has_no_indent()
+        json_light = self.to_json()
         write_string_to_file(json_light, add_suffix(file, '.json'))
 
     def store_to_disk(self, file):
@@ -381,3 +396,13 @@ class PersistentDataclass:
     @classmethod
     def load(cls: Type[T], file) -> T:
         return cls.load_from_disk(file)
+
+    def update(self, file):
+        """
+        Updates all fields of an dataclass instance with data from disk, expcept fields mith metadata={'exclude': True}.
+        Those excluded fields are not updated.
+        :param file:
+        :return:
+        """
+        loaded = self.load_from_disk(file)
+        _replace_not_excluded_fields(self, loaded)

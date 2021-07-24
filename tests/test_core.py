@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Union, Dict, List, Tuple
 
-from dataclass_persistence import PersistentDataclass
+from dataclass_persistence import Persistent, EXCLUDE
 from pytest import fixture, mark
 
 
@@ -40,7 +40,7 @@ class ConfigSystemCustom:
 
 
 @dataclass
-class SimDataCustom(PersistentDataclass):
+class SimDataCustom(Persistent):
     config_system: ConfigSystemCustom
     sim_points: List[SimPointCustom]
 
@@ -72,12 +72,12 @@ def test_store_load_sim_data(file_dir, method):
 
 
 @dataclass
-class Class(PersistentDataclass):
+class Class(Persistent):
     param_a: str
-    param_b: str = field(metadata={'private': True})
+    param_b: str = field(metadata=EXCLUDE)
 
 
-def test_do_not_store_load_private_marked_fields(file_dir):
+def test_do_not_store_load_excluded_fields(file_dir):
     config = Class('a', 'b')
     file = file_dir.joinpath('config_without_private_field')
     config.store_to_disk_uncompressed_single_json_file(file=file)
@@ -90,7 +90,28 @@ def test_do_not_store_load_private_marked_fields(file_dir):
 
 
 @dataclass
-class ClassWithNumpy(PersistentDataclass):
+class NestedClass(Persistent):
+    cls_a: Class = field(metadata=EXCLUDE)
+    cls_b: Class
+    param_a: str = field(metadata=EXCLUDE)
+
+
+def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
+    config = NestedClass(Class('a', 'b'), Class('c', 'd'), 'e')
+    file = file_dir.joinpath('config_without_excluded_field')
+    config.store(file=file)
+    loaded = NestedClass.load(file=file)
+    assert loaded.cls_a is None
+    assert loaded.cls_b.param_b is None
+    assert loaded.param_a is None
+    config.update(file=file)
+    assert config.cls_a == Class('a', 'b')
+    assert config.cls_b.param_b == 'd'
+    assert config.param_a == 'e'
+
+
+@dataclass
+class ClassWithNumpy(Persistent):
     param_a: np.ndarray
     param_b: str = 'hello'
 
@@ -106,7 +127,7 @@ def test_dataclass_with_numpy_arrays(file_dir):
 
 
 @dataclass
-class ClassWithTuple(PersistentDataclass):
+class ClassWithTuple(Persistent):
     param_a: Tuple[int, int]
 
 
@@ -121,7 +142,7 @@ def test_dataclass_with_tuple(file_dir):
 
 
 @dataclass
-class ClassWithComplexValues(PersistentDataclass):
+class ClassWithComplexValues(Persistent):
     param_a: Tuple[complex, int]
     list_cplx: List[complex]
     ary: np.ndarray
@@ -138,7 +159,7 @@ def test_dataclass_with_complex_value(file_dir):
 
 
 @dataclass(eq=True)
-class ClassWithUnions(PersistentDataclass):
+class ClassWithUnions(Persistent):
     param_a: Union[complex, int] = None
     param_d: Union[float, ConfigSomeComponentA] = ConfigSomeComponentA()
     param_b: Union[float, str] = 1.0
@@ -160,7 +181,7 @@ def test_dataclass_same_name_different_directory():
     from tests.data.b import SomeCls as SomeClsB
 
     @dataclass
-    class SomeCls(PersistentDataclass):
+    class SomeCls(Persistent):
         data: Union[SomeClsA, SomeClsB] = None
 
     file = 'cache/class_same_name_differnt_dir'
