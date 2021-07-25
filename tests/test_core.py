@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
+from enum import Enum
+
 import numpy as np
 import json
 from pathlib import Path
 from typing import Union, Dict, List, Tuple
 
-from dataclass_persistence import Persistent, EXCLUDE
+from dataclass_persistence import Persistent, EXCLUDE, Mode
 from pytest import fixture, mark
 
 
@@ -50,25 +52,22 @@ def file_dir():
     return Path(__file__).parent.joinpath('cache')
 
 
-@mark.parametrize("method", ['store_to_disk_uncompressed_single_json_file', 'store_to_disk'])
-def test_store_load_sim_data(file_dir, method):
-    def run_for_certain_format(method='store_to_disk'):
-        sim_data = SimDataCustom(config_system=ConfigSystemCustom(conf_component=ConfigSomeComponentA()),
-                                 sim_points=[SimPointCustom(params={'a': 1.0},
-                                                            result=ResultSystemCustom(np.zeros(1000)))
-                                             for i in range(100)])
-        file = file_dir.joinpath('some_name')
-        getattr(sim_data, method)(file)
-        sim_data_reconstructed: SimDataCustom = SimDataCustom.load_from_disk(file)
+@mark.parametrize("mode", [Mode.ZIP, Mode.JSON])
+def test_store_load_sim_data(file_dir, mode):
+    sim_data = SimDataCustom(config_system=ConfigSystemCustom(conf_component=ConfigSomeComponentA()),
+                             sim_points=[SimPointCustom(params={'a': 1.0},
+                                                        result=ResultSystemCustom(np.zeros(1000)))
+                                         for i in range(100)])
+    file = file_dir.joinpath('some_name')
+    sim_data.store(file, mode=mode)
+    sim_data_reconstructed: SimDataCustom = SimDataCustom.load(file)
 
-        sim_points_rec = sim_data_reconstructed.sim_points
-        sim_points = sim_data.sim_points
-        for i, sim_point in enumerate(sim_points):
-            assert np.all(sim_point.result.ary == sim_points_rec[i].result.ary)
-        assert np.all(sim_data.config_system.conf_component.array_a ==
-                      sim_data_reconstructed.config_system.conf_component.array_a)
-
-    run_for_certain_format(method)
+    sim_points_rec = sim_data_reconstructed.sim_points
+    sim_points = sim_data.sim_points
+    for i, sim_point in enumerate(sim_points):
+        assert np.all(sim_point.result.ary == sim_points_rec[i].result.ary)
+    assert np.all(sim_data.config_system.conf_component.array_a ==
+                  sim_data_reconstructed.config_system.conf_component.array_a)
 
 
 @dataclass
@@ -80,12 +79,12 @@ class Class(Persistent):
 def test_do_not_store_load_excluded_fields(file_dir):
     config = Class('a', 'b')
     file = file_dir.joinpath('config_without_private_field')
-    config.store_to_disk_uncompressed_single_json_file(file=file)
+    config._store_to_disk_uncompressed_single_json_file(file=file)
     with open(str(file.with_suffix('.json')), 'r') as data_file:
         json_string = '\n'.join(data_file.readlines())
         dict_data = json.loads(json_string)
     assert dict_data['param_b'] is None
-    config_loaded = Class.load_from_disk(file)
+    config_loaded = Class.load(file)
     assert config_loaded.param_b is None
 
 
@@ -120,8 +119,8 @@ def test_dataclass_with_numpy_arrays(file_dir):
     ary = np.array([1, 2, 3])
     config = ClassWithNumpy(ary, 'b')
     file = file_dir.joinpath('config_with_numpy')
-    config.store_to_disk(file=file)
-    config_loaded = ClassWithNumpy.load_from_disk(file)
+    config.store(file=file)
+    config_loaded = ClassWithNumpy.load(file)
 
     assert np.all(config_loaded.param_a == ary)
 
@@ -135,8 +134,8 @@ def test_dataclass_with_tuple(file_dir):
     tpl = (1, 2)
     config = ClassWithTuple(tpl)
     file = file_dir.joinpath('class_with_tuple')
-    config.store_to_disk(file=file)
-    config_loaded = ClassWithTuple.load_from_disk(file)
+    config.store(file=file)
+    config_loaded = ClassWithTuple.load(file)
 
     assert np.all(config_loaded.param_a == tpl)
 
@@ -153,8 +152,8 @@ def test_dataclass_with_complex_value(file_dir):
     list_cplx = [1 + 10j] * 10
     config = ClassWithComplexValues(tpl, ary=np.array([1 + 3j]), list_cplx=list_cplx)
     file = file_dir.joinpath('class_with_cplx')
-    config.store_to_disk(file=file)
-    config_loaded = ClassWithComplexValues.load_from_disk(file)
+    config.store(file=file)
+    config_loaded = ClassWithComplexValues.load(file)
     assert np.all(config_loaded.param_a == tpl)
 
 
@@ -187,8 +186,25 @@ def test_dataclass_same_name_different_directory():
     file = 'cache/class_same_name_differnt_dir'
     some_cls = SomeCls(SomeClsB('3'))
     some_cls.store(file)
-    some_cls_loaded = SomeCls.load_from_disk(file)
+    some_cls_loaded = SomeCls.load(file)
     assert hasattr(some_cls_loaded.data, 'valb')
+
+
+class MyEnum(Enum):
+    VAL_A = 'val a'
+    VAL_B = 'val b'
+
+
+@dataclass
+class EnumDataclass(Persistent):
+    val: MyEnum = MyEnum.VAL_A
+
+
+def test_enum():
+    c = EnumDataclass()
+    json_ = c.to_json()
+    c_loaded = EnumDataclass.from_json(json_)
+    assert c == c_loaded
 
 # from simcomm.helpers.shared_memory_tools import IntegerSharedMemory
 # @dataclass

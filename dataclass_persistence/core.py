@@ -2,6 +2,7 @@ import json
 import logging
 import zipfile
 from dataclasses import dataclass, is_dataclass, fields
+from enum import Enum
 from pathlib import Path
 from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
@@ -46,12 +47,11 @@ built_in_types = [int, float, str, bool, complex, type(None)]
 built_in_types_names = [t.__name__ for t in built_in_types]
 
 
-def create_light_and_heavy_part_from_instance(instance,
-                                              dict_heavy: Dict[str, np.ndarray] = None,
-                                              name_instance: str = '') -> \
-        Tuple[Union[None, dict, list, tuple, str,
-                    float, int, bool],
-              Dict[str, object]]:
+def dataclass_to_dicts(instance,
+                       dict_heavy: Dict[str, np.ndarray] = None,
+                       name_instance: str = '') -> Tuple[Union[None, dict, list, tuple, str,
+                                                               float, int, bool],
+                                                         Dict[str, object]]:
     """
 
 
@@ -97,9 +97,9 @@ def create_light_and_heavy_part_from_instance(instance,
             if _field.metadata.get(EXCLUDE_KEY, False):
                 json_object[_field.name] = None
             else:
-                json_object[_field.name] = create_light_and_heavy_part_from_instance(value,
-                                                                                     dict_heavy,
-                                                                                     _field.name)[0]
+                json_object[_field.name] = dataclass_to_dicts(value,
+                                                              dict_heavy,
+                                                              _field.name)[0]
                 if hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union:
                     if is_dataclass(value):
                         json_object[_field.name]['type'] = f'{type(value).__module__}.{type(value).__name__}'
@@ -109,12 +109,12 @@ def create_light_and_heavy_part_from_instance(instance,
         return json_object, dict_heavy
     elif type(instance) == tuple:
         return tuple(
-            [create_light_and_heavy_part_from_instance(item, dict_heavy, )[0] for item in instance]), dict_heavy
+            [dataclass_to_dicts(item, dict_heavy, )[0] for item in instance]), dict_heavy
     elif type(instance) == list:
-        return [create_light_and_heavy_part_from_instance(item, dict_heavy, )[0] for item in instance], dict_heavy
+        return [dataclass_to_dicts(item, dict_heavy, )[0] for item in instance], dict_heavy
 
     elif type(instance) == dict:
-        return {k: create_light_and_heavy_part_from_instance(v, dict_heavy)[0]
+        return {k: dataclass_to_dicts(v, dict_heavy)[0]
                 for k, v in instance.items()}, dict_heavy
     elif instance is None:
         return instance, dict_heavy
@@ -127,9 +127,11 @@ def create_light_and_heavy_part_from_instance(instance,
         return identifier, dict_heavy
     elif hasattr(instance, 'dtype'):
         # https://stackoverflow.com/questions/9452775/converting-numpy-dtypes-to-native-python-types
-        return create_light_and_heavy_part_from_instance(instance.item(), dict_heavy)
+        return dataclass_to_dicts(instance.item(), dict_heavy)
     elif type(instance) in built_in_types:
         return instance, dict_heavy
+    elif isinstance(instance, Enum):
+        return dataclass_to_dicts(instance.name, dict_heavy)
     else:
         raise ValueError('Case not implemented')
 
@@ -175,6 +177,10 @@ def create_instance_from_data_dict(type_instance,
         return data_dict
     elif type_instance in built_in_types:
         return data_dict
+    elif isinstance(type_instance, type(Enum)):
+        return type_instance[data_dict]
+    else:
+        raise NotImplementedError()
 
 
 # import h5py
@@ -289,7 +295,7 @@ def add_suffix(file: Path, suffix: str):
 
 
 def create_json_from_instance(instance):
-    dict_light, dict_heavy = create_light_and_heavy_part_from_instance(instance)
+    dict_light, dict_heavy = dataclass_to_dicts(instance)
     json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
     replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
                     for key, value in dict_heavy.items()}
@@ -321,6 +327,11 @@ def _replace_not_excluded_fields(old, new):
                 old.__setattr__(key, new.__getattribute__(key))
 
 
+class Mode(Enum):  # output file format
+    ZIP = 'zip'
+    JSON = 'json'
+
+
 class Persistent:  # on difference between persitable and persistent: https://wikidiff.com/persistent/persistable
     @staticmethod
     def _deal_with_file(file: Union[Path, str]) -> Path:
@@ -336,7 +347,7 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         json_light = create_json_from_instance(self)
         return json_light
 
-    def store_to_disk_compressed_including_single_json_file(self, file):
+    def _store_to_disk_compressed_including_single_json_file(self, file):
         # todo remove uncompressed file if exists
         file = self._deal_with_file(file)
         json_light = self.to_json()
@@ -352,21 +363,17 @@ class Persistent:  # on difference between persitable and persistent: https://wi
     #     dict_files[self._extract_file_name(file)] = json_light
     #     store_files_to_zip(file, dict_files)
 
-    def store_to_disk_uncompressed_single_json_file(self, file):
+    def _store_to_disk_uncompressed_single_json_file(self, file):
         json_light = self.to_json()
         write_string_to_file(json_light, add_suffix(file, '.json'))
 
-    def store_to_disk(self, file):
-        """
-        Stores as zip file containing json file.
-
-        :param sim_data:
-        :return:
-        """
-        self.store_to_disk_compressed_including_single_json_file(file)
-
-    def store(self, file):
-        self.store_to_disk(file)
+    def store(self, file, mode: Mode = Mode.ZIP):
+        if mode is Mode.ZIP:
+            self._store_to_disk_compressed_including_single_json_file(file)
+        elif mode is Mode.JSON:
+            self._store_to_disk_uncompressed_single_json_file(file)
+        else:
+            raise NotImplementedError()
 
     @classmethod
     def _load_from_disk_uncompressed(cls, file: Path) -> T:
@@ -381,7 +388,7 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         return create_instance_from_data_dict(cls, dict_data)
 
     @classmethod
-    def load_from_disk(cls: Type[T], file) -> T:
+    def load(cls: Type[T], file) -> T:
         file = cls._deal_with_file(file)
         # remove suffix if exists
         if file.suffix in ['.json', '.zip']:
@@ -394,8 +401,8 @@ class Persistent:  # on difference between persitable and persistent: https://wi
             raise FileNotFoundError('No file with supported type found')
 
     @classmethod
-    def load(cls: Type[T], file) -> T:
-        return cls.load_from_disk(file)
+    def from_json(cls, json_: str) -> T:
+        return create_instance_from_data_dict(cls, json.loads(json_))
 
     def update(self, file):
         """
@@ -404,5 +411,5 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         :param file:
         :return:
         """
-        loaded = self.load_from_disk(file)
+        loaded = self.load(file)
         _replace_not_excluded_fields(self, loaded)
