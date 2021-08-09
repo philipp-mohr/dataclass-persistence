@@ -1,3 +1,4 @@
+import importlib
 import json
 import logging
 import zipfile
@@ -100,9 +101,12 @@ def dataclass_to_dicts(instance,
                 json_object[_field.name] = dataclass_to_dicts(value,
                                                               dict_heavy,
                                                               _field.name)[0]
-                if hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union:
+                conditions = [hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union,
+                              # required for future imports: and type(value).__name__ != _field.type
+                              type(value) != _field.type and type(value).__name__ != _field.type]
+                if any(conditions):
                     if is_dataclass(value):
-                        json_object[_field.name]['type'] = f'{type(value).__module__}.{type(value).__name__}'
+                        json_object[_field.name]['type'] = f'{type(value).__module__}|{type(value).__name__}'
                     elif type(value) in built_in_types:
                         json_object[_field.name] = {'type': str(type(value).__name__),
                                                     'value': json_object[_field.name]}
@@ -136,6 +140,14 @@ def dataclass_to_dicts(instance,
         raise ValueError('Case not implemented')
 
 
+def _create_instance_from_type_str(type_str, **kwargs):
+    # https://stackoverflow.com/questions/4821104/dynamic-instantiation-from-string-name-of-a-class-in-dynamically-imported-module
+    module, cls_name = type_str.split('|')
+    module_ = importlib.import_module(module)
+    class_ = getattr(module_, cls_name)
+    return class_(**kwargs)
+
+
 def create_instance_from_data_dict(type_instance,
                                    data_dict):
     if is_dataclass(type_instance):
@@ -154,7 +166,10 @@ def create_instance_from_data_dict(type_instance,
                 kwargs[_field.name] = None
             else:
                 kwargs[_field.name] = create_instance_from_data_dict(_field.type, _value)
-        return type_instance(**kwargs)
+        if 'type' in data_dict:
+            return _create_instance_from_type_str(data_dict['type'], **kwargs)
+        else:
+            return type_instance(**kwargs)
     elif hasattr(type_instance, '__origin__'):
         # https://stackoverflow.com/questions/48572831/how-to-access-the-type-arguments-of-typing-generic
         if type_instance.__origin__ == tuple:
@@ -170,7 +185,7 @@ def create_instance_from_data_dict(type_instance,
             for arg in type_instance.__args__:
                 if data_dict['type'] in built_in_types_names:
                     return create_instance_from_data_dict(arg, data_dict['value'])
-                elif data_dict['type'] in str(f'{arg.__module__}.{arg.__name__}'):
+                elif data_dict['type'] in str(f'{arg.__module__}|{arg.__name__}'):
                     return create_instance_from_data_dict(arg, data_dict)
             raise ValueError('specific type not found in given Union type')
     elif type_instance in [np.ndarray, np.array]:
@@ -399,6 +414,10 @@ class Persistent:  # on difference between persitable and persistent: https://wi
             return cls._load_from_disk_compressed(file)
         else:
             raise FileNotFoundError('No file with supported type found')
+
+    @staticmethod
+    def load_as_dict(file):
+        return load(file)
 
     @classmethod
     def from_json(cls, json_: str) -> T:

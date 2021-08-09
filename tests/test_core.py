@@ -1,3 +1,4 @@
+from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -204,6 +205,28 @@ def test_enum():
     c = EnumDataclass()
     json_ = c.to_json()
     c_loaded = EnumDataclass.from_json(json_)
+    assert c == c_loaded
+
+
+@dataclass
+class MyBase(ABC):
+    pass
+
+
+@dataclass
+class MyImpl(MyBase):
+    pass
+
+
+@dataclass
+class DataclassWithSubClass(Persistent):
+    val: MyBase = None
+
+
+def test_restore_subclass_of_abstract_base_class():
+    c = DataclassWithSubClass(val=MyImpl())
+    json_ = c.to_json()
+    c_loaded = DataclassWithSubClass.from_json(json_)
     assert c == c_loaded
 
 # from simcomm.helpers.shared_memory_tools import IntegerSharedMemory
