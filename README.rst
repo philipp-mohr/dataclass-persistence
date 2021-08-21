@@ -12,29 +12,29 @@ What makes dataclass-persistence special?
 
 Usage
 -----
-Let your dataclass inherit from :code:`PersistentDataclass`.
-Then the dataclass can be stored on disk using :code:`.store_to_disk()` and loaded from disk using
-:code:`.load_from_disk()`.
+Let your dataclass inherit from :code:`Persistent`.
+Then the dataclass can be stored on disk using :code:`.store()` and loaded from disk using
+:code:`.load()`.
 
 In the example below, we create an instance of dataclass, which is stored to and loaded from disk.
 
 .. code-block:: python
 
-    from dataclass_persistence import PersistentDataclass
+    from dataclass_persistence import Persistent
     from dataclasses import dataclass
     import numpy as np
 
 
     @dataclass
-    class SomeData(PersistentDataclass):
+    class SomeData(Persistent):
         parameter_a: str
         array: np.ndarray
 
 
     data = SomeData('my_string', np.array([0, 0]))
     file = 'my_file'
-    data.store_to_disk(file)
-    data_reconstructed = SomeData.load_from_disk(file)
+    data.store(file)
+    data_reconstructed = SomeData.load(file)
 
 On disk the code above produces `my_file.zip` which contains `my_file.json`:
 
