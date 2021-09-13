@@ -48,6 +48,25 @@ built_in_types = [int, float, str, bool, complex, type(None)]
 built_in_types_names = [t.__name__ for t in built_in_types]
 
 
+def specify_type_for_special_cases(json_object, _field, value):
+    # example cases:
+    # if field is of type Union[int, str] the type at reconstruction time would be ambiguous and must be stored.
+    # if field is of type Base and value is of type SubClass(Base), the path to the subclass must be stored.
+    conditions = [hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union,
+                  # required for future imports: and type(value).__name__ != _field.type
+                  type(value) != _field.type and value is not None and type(value).__name__ != _field.type]
+    if any(conditions):
+        if is_dataclass(value):
+            json_object[_field.name]['type'] = f'{type(value).__module__}|{type(value).__name__}'
+        elif type(value) in [list, tuple] and len(value) > 0:
+            for _value, _json_object in zip(value, json_object[_field.name]):
+                if is_dataclass(_value):
+                    _json_object['type'] = f'{type(_value).__module__}|{type(_value).__name__}'
+        elif type(value) in built_in_types:
+            json_object[_field.name] = {'type': str(type(value).__name__),
+                                        'value': json_object[_field.name]}
+
+
 def dataclass_to_dicts(instance,
                        dict_heavy: Dict[str, np.ndarray] = None,
                        name_instance: str = '') -> Tuple[Union[None, dict, list, tuple, str,
@@ -101,21 +120,13 @@ def dataclass_to_dicts(instance,
                 json_object[_field.name] = dataclass_to_dicts(value,
                                                               dict_heavy,
                                                               _field.name)[0]
-                conditions = [hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union,
-                              # required for future imports: and type(value).__name__ != _field.type
-                              type(value) != _field.type and value is not None and type(value).__name__ != _field.type]
-                if any(conditions):
-                    if is_dataclass(value):
-                        json_object[_field.name]['type'] = f'{type(value).__module__}|{type(value).__name__}'
-                    elif type(value) in built_in_types:
-                        json_object[_field.name] = {'type': str(type(value).__name__),
-                                                    'value': json_object[_field.name]}
+                specify_type_for_special_cases(json_object, _field, value)
         return json_object, dict_heavy
     elif type(instance) == tuple:
         return tuple(
             [dataclass_to_dicts(item, dict_heavy, )[0] for item in instance]), dict_heavy
     elif type(instance) == list:
-        return [dataclass_to_dicts(item, dict_heavy, )[0] for item in instance], dict_heavy
+        return [dataclass_to_dicts(item, dict_heavy)[0] for item in instance], dict_heavy
 
     elif type(instance) == dict:
         return {k: dataclass_to_dicts(v, dict_heavy)[0]
@@ -139,12 +150,15 @@ def dataclass_to_dicts(instance,
     else:
         raise ValueError('Case not implemented')
 
-
-def _create_instance_from_type_str(type_str, **kwargs):
+def _get_cls_from_type_str(type_str, **kwargs):
     # https://stackoverflow.com/questions/4821104/dynamic-instantiation-from-string-name-of-a-class-in-dynamically-imported-module
     module, cls_name = type_str.split('|')
     module_ = importlib.import_module(module)
     class_ = getattr(module_, cls_name)
+    return class_
+
+def _create_instance_from_type_str(type_str, **kwargs):
+    class_ = _get_cls_from_type_str(type_str)
     return class_(**kwargs)
 
 
@@ -153,6 +167,11 @@ def create_instance_from_data_dict(type_instance,
     if is_dataclass(type_instance):
         if data_dict is None:
             return None
+        # in case of ambiguities in the type hint, the type information will be stored inside of the json file
+        # the loaded type information replaces the one from the class definition.
+        # see function: specify_type_for_special_cases()
+        if 'type' in data_dict:
+            type_instance = _get_cls_from_type_str(data_dict['type'])
         kwargs = {}
         _fields = [(data_dict[_field.name], _field) for _field in fields(type_instance) if _field.name in data_dict]
         for _value, _field in _fields:
@@ -166,10 +185,7 @@ def create_instance_from_data_dict(type_instance,
                 kwargs[_field.name] = None
             else:
                 kwargs[_field.name] = create_instance_from_data_dict(_field.type, _value)
-        if 'type' in data_dict:
-            return _create_instance_from_type_str(data_dict['type'], **kwargs)
-        else:
-            return type_instance(**kwargs)
+        return type_instance(**kwargs)
     elif hasattr(type_instance, '__origin__'):
         # https://stackoverflow.com/questions/48572831/how-to-access-the-type-arguments-of-typing-generic
         if type_instance.__origin__ == tuple:

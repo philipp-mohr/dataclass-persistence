@@ -22,7 +22,7 @@ URL = 'https://github.com/piveloper/dataclass-persistence'
 EMAIL = 'piveloper@gmail.com'
 AUTHOR = 'piveloper'
 REQUIRES_PYTHON = '>=3.8.0'
-VERSION = '0.0.17'
+VERSION = '0.0.18'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
