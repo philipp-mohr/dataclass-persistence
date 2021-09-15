@@ -165,27 +165,7 @@ def _create_instance_from_type_str(type_str, **kwargs):
 def create_instance_from_data_dict(type_instance,
                                    data_dict):
     if is_dataclass(type_instance):
-        if data_dict is None:
-            return None
-        # in case of ambiguities in the type hint, the type information will be stored inside of the json file
-        # the loaded type information replaces the one from the class definition.
-        # see function: specify_type_for_special_cases()
-        if 'type' in data_dict:
-            type_instance = _get_cls_from_type_str(data_dict['type'])
-        kwargs = {}
-        _fields = [(data_dict[_field.name], _field) for _field in fields(type_instance) if _field.name in data_dict]
-        for _value, _field in _fields:
-            if isinstance(_field.type, str):
-                _field.type = get_type_hints(type_instance)[_field.name]
-            if _field.init is False:
-                pass
-            elif _field.metadata.get(EXCLUDE_KEY, False):
-                kwargs[_field.name] = None
-            elif _value is None:
-                kwargs[_field.name] = None
-            else:
-                kwargs[_field.name] = create_instance_from_data_dict(_field.type, _value)
-        return type_instance(**kwargs)
+        return deal_with_dataclass_type_instance(type_instance, data_dict)
     elif hasattr(type_instance, '__origin__'):
         # https://stackoverflow.com/questions/48572831/how-to-access-the-type-arguments-of-typing-generic
         if type_instance.__origin__ == tuple:
@@ -212,6 +192,36 @@ def create_instance_from_data_dict(type_instance,
         return type_instance[data_dict]
     else:
         raise NotImplementedError()
+
+
+def deal_with_dataclass_type_instance(type_instance, data_dict):
+    if data_dict is None:
+        return None
+    # in case of ambiguities in the type hint, the type information will be stored inside of the json file
+    # the loaded type information replaces the one from the class definition.
+    # see function: specify_type_for_special_cases()
+    if 'type' in data_dict:
+        type_instance = _get_cls_from_type_str(data_dict['type'])
+    kwargs, kwargs_init_false = {}, {}
+    _fields = [(data_dict[_field.name], _field) for _field in fields(type_instance) if _field.name in data_dict]
+    for _value, _field in _fields:
+        if isinstance(_field.type, str):
+            _field.type = get_type_hints(type_instance)[_field.name]
+        if _field.metadata.get(EXCLUDE_KEY, False):
+            kwargs[_field.name] = None
+        elif _value is None:
+            kwargs[_field.name] = None
+        else:
+            val = create_instance_from_data_dict(_field.type, _value)
+            if _field.init is False:
+                kwargs_init_false[_field.name] = val
+            else:
+                kwargs[_field.name] = val
+    instance = type_instance(**kwargs)
+    for k, v in kwargs_init_false.items():
+        instance.__setattr__(k, v)
+    return instance
+
 
 
 # import h5py

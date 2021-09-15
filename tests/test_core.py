@@ -232,6 +232,19 @@ def test_restore_subclass_of_abstract_base_class():
     c_loaded = DataclassWithSubClass.from_json(json_)
     assert c == c_loaded  # performs nested comparison
 
+
+@dataclass
+class MyClassInitFalse(Persistent):
+    b: int = field(init=False)
+    a: int = 5
+
+
+def test_restore_init_false_fields():
+    my = MyClassInitFalse()
+    my.b = 10
+    my_json = my.to_json()
+    my2 = MyClassInitFalse.from_json(my_json)
+    assert my == my2
 # from simcomm.helpers.shared_memory_tools import IntegerSharedMemory
 # @dataclass
 # class SmData(PersistentDataclass):
