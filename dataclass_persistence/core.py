@@ -164,9 +164,7 @@ def _create_instance_from_type_str(type_str, **kwargs):
 
 def create_instance_from_data_dict(type_instance,
                                    data_dict):
-    if is_dataclass(type_instance):
-        return deal_with_dataclass_type_instance(type_instance, data_dict)
-    elif hasattr(type_instance, '__origin__'):
+    if hasattr(type_instance, '__origin__'):
         # https://stackoverflow.com/questions/48572831/how-to-access-the-type-arguments-of-typing-generic
         if type_instance.__origin__ == tuple:
             return tuple([create_instance_from_data_dict(type_instance.__args__[0], item)
@@ -191,17 +189,20 @@ def create_instance_from_data_dict(type_instance,
     elif isinstance(type_instance, type(Enum)):
         return type_instance[data_dict]
     else:
-        raise NotImplementedError()
+        # in case of ambiguities in the type hint, the type information will be stored inside of the json file
+        # the loaded type information replaces the one from the class definition.
+        # see function: specify_type_for_special_cases()
+        if 'type' in data_dict:
+            type_instance = _get_cls_from_type_str(data_dict['type'])
+        if is_dataclass(type_instance):
+            return deal_with_dataclass_type_instance(type_instance, data_dict)
+        else:
+            raise NotImplementedError()
 
 
 def deal_with_dataclass_type_instance(type_instance, data_dict):
     if data_dict is None:
         return None
-    # in case of ambiguities in the type hint, the type information will be stored inside of the json file
-    # the loaded type information replaces the one from the class definition.
-    # see function: specify_type_for_special_cases()
-    if 'type' in data_dict:
-        type_instance = _get_cls_from_type_str(data_dict['type'])
     kwargs, kwargs_init_false = {}, {}
     _fields = [(data_dict[_field.name], _field) for _field in fields(type_instance) if _field.name in data_dict]
     for _value, _field in _fields:
