@@ -5,9 +5,9 @@ from enum import Enum
 import numpy as np
 import json
 from pathlib import Path
-from typing import Union, Dict, List, Tuple
+from typing import Union, Dict, List, Tuple, Optional
 
-from dataclass_persistence import Persistent, EXCLUDE, Mode
+from dataclass_persistence import Persistent, EXCLUDE, Mode, EXPLICIT
 from pytest import fixture, mark
 
 
@@ -245,14 +245,38 @@ def test_restore_init_false_fields():
     my_json = my.to_json()
     my2 = MyClassInitFalse.from_json(my_json)
     assert my == my2
-# from simcomm.helpers.shared_memory_tools import IntegerSharedMemory
-# @dataclass
-# class SmData(PersistentDataclass):
-#     number: IntegerSharedMemory
-#
-#
-# def test_dataclass_with_shared_memory(file_dir):
-#     res = SmData(IntegerSharedMemory(10, length_bytes=10))
-#     res.store_to_disk(file_dir.joinpath('sm_data'))
-#     res_loaded = SmData.load_from_disk(file_dir.joinpath('sm_data'))
-#     assert res.number.value == res_loaded.number.value
+
+
+@dataclass
+class MyClassFilterFields(Persistent):
+    a: np.ndarray = field(default=None, metadata=EXPLICIT('large_data'))
+
+
+def test_preserve_fields_only_if_explicitly_required(file_dir, request):
+    # Specific fields may contain data which is irrelevant for preservation in most cases.
+    # Those fields may be marked with the 'explicit' key inside inside of the metadata with some identifier
+    # e.g. 'large_data'.
+    # ONLY if this identifier is provided in store(explicit=['large_data',...]]), the field will be preserved.
+    my = MyClassFilterFields(a=np.array([100000]))
+    my.store((_f := file_dir.joinpath(request.node.name)), explicit=['large_data'])
+    json2 = my.to_json(explicit=['large_data'])
+    json3 = my.to_json()  # by default explicit marked fields are not stored
+    my_loaded = MyClassFilterFields.load(_f)
+    my_loaded2 = MyClassFilterFields.from_json(json2)
+    my_loaded3 = MyClassFilterFields.from_json(json3)
+    assert my_loaded.a == my_loaded2.a
+    assert my_loaded3.a is None
+
+
+SEPARATE = {'separate': True}
+
+
+@dataclass
+class MyClassLargeFields(Persistent):
+    a: Optional[np.ndarray] = field(default=None, metadata=SEPARATE)
+
+
+@mark.skip()
+def test_separate_large_fields():
+    my = MyClassLargeFields(a=np.array(100000))
+    my.store()  # goal: only put ID inside of json file which point to some SEPARATE file which contains the data

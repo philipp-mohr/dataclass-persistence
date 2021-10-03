@@ -4,6 +4,7 @@ import logging
 import zipfile
 from dataclasses import dataclass, is_dataclass, fields
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
@@ -15,6 +16,13 @@ import numpy as np
 # e.g. var_a: str = field(metadata=EXCLUDE|{'other_metakey': some_val})
 EXCLUDE_KEY = 'exclude'
 EXCLUDE = {EXCLUDE_KEY: True}
+
+# fields which use the explicit key, are only stored if identifier is explicitly given in store method.
+EXPLICIT_KEY = 'exclude'
+
+
+def EXPLICIT(identifier: str):
+    return {EXPLICIT_KEY: identifier}
 
 
 def write_string_to_file(data_str: str, file, b_logging: bool = True):
@@ -67,70 +75,60 @@ def specify_type_for_special_cases(json_object, _field, value):
                                         'value': json_object[_field.name]}
 
 
+def do_preserve_field(field_, explicit: tuple[str]):
+    """
+    if my_class.store(file, explicit=['some_id1']
+        a: _some_type_ =field(metadata=EXPLICIT('some_id1'))-> preserve field a
+    if my_class.store(file)
+        a: _some_type_ =field(metadata=EXPLICIT('some_id1'))-> DO NOT preserve field a
+
+    a=field(metadata=EXCLUDE)-> field is NOT preserved
+
+    :param field_:
+    :param explicit:
+    :return:
+    """
+    identifier = field_.metadata.get(EXPLICIT_KEY, '')
+    explict_preserve = identifier in explicit or identifier == ''
+    return not field_.metadata.get(EXCLUDE_KEY, False) or explict_preserve
+
+
 def dataclass_to_dicts(instance,
                        dict_heavy: Dict[str, np.ndarray] = None,
-                       name_instance: str = '') -> Tuple[Union[None, dict, list, tuple, str,
-                                                               float, int, bool],
-                                                         Dict[str, object]]:
+                       name_instance: str = '', explicit: tuple[str] = (),
+                       ) -> Tuple[Union[None, dict, list, tuple, str, float, int, bool],
+                                  Dict[str, object]]:
     """
 
 
     :param name_instance:
-    :param instance: e.g. some class structure resulting in a dictionary like in the example dict_some_dataclass
-    :param dict_some_dataclass: {}
+    :param instance:
     :param dict_heavy: {}
+    :param explicit: provides identifiers which are used to preserve fields explicitly.
     :return:
-    e.g.
-    dict_some_dataclass = {
-        'config_system':{
-            'conf_component':{
-                'class_type': 'ConfigSomeComponentA', # this info is needed for reconstruction when e.g. following type
-                                                      # is used: Union[ConfigSomeComponentA, ConfigSomeComponentB]
-                'param_a': int,
-                'array_a': 'array_a_1'.
-            }
-        },
-        'sim_points': [
-            {'param': 1.0,
-             'result': {
-                    'value': 0.1
-                }
-            },
-            {'param': 2.0,
-             'result': {
-                    'value': 0.2
-                }
-            }
-        ]
-    }
-
-    dict_numpy_array = {
-        'array_a_1': np.array([1,2,3])
-    }
     """
+    _dataclass_to_dicts = lambda _instance: dataclass_to_dicts(_instance, dict_heavy, name_instance, explicit)
     if dict_heavy is None:
         dict_heavy = {}
     json_object = {}
     if is_dataclass(instance):
         _fields = [(getattr(instance, _field.name), _field) for _field in fields(instance)]
         for value, _field in _fields:
-            if _field.metadata.get(EXCLUDE_KEY, False):
-                json_object[_field.name] = None
-            else:
+            if do_preserve_field(_field, explicit):
                 json_object[_field.name] = dataclass_to_dicts(value,
                                                               dict_heavy,
                                                               _field.name)[0]
                 specify_type_for_special_cases(json_object, _field, value)
+            else:
+                json_object[_field.name] = None
         return json_object, dict_heavy
     elif type(instance) == tuple:
-        return tuple(
-            [dataclass_to_dicts(item, dict_heavy, )[0] for item in instance]), dict_heavy
+        return tuple([_dataclass_to_dicts(item)[0] for item in instance]), dict_heavy
     elif type(instance) == list:
-        return [dataclass_to_dicts(item, dict_heavy)[0] for item in instance], dict_heavy
+        return [_dataclass_to_dicts(item)[0] for item in instance], dict_heavy
 
     elif type(instance) == dict:
-        return {k: dataclass_to_dicts(v, dict_heavy)[0]
-                for k, v in instance.items()}, dict_heavy
+        return {k: _dataclass_to_dicts(v)[0] for k, v in instance.items()}, dict_heavy
     elif instance is None:
         return instance, dict_heavy
     # decode fields to json format
@@ -142,13 +140,14 @@ def dataclass_to_dicts(instance,
         return identifier, dict_heavy
     elif hasattr(instance, 'dtype'):
         # https://stackoverflow.com/questions/9452775/converting-numpy-dtypes-to-native-python-types
-        return dataclass_to_dicts(instance.item(), dict_heavy)
+        return _dataclass_to_dicts(instance.item())
     elif type(instance) in built_in_types:
         return instance, dict_heavy
     elif isinstance(instance, Enum):
-        return dataclass_to_dicts(instance.name, dict_heavy)
+        return _dataclass_to_dicts(instance.name)
     else:
         raise ValueError('Case not implemented')
+
 
 def _get_cls_from_type_str(type_str, **kwargs):
     # https://stackoverflow.com/questions/4821104/dynamic-instantiation-from-string-name-of-a-class-in-dynamically-imported-module
@@ -156,6 +155,7 @@ def _get_cls_from_type_str(type_str, **kwargs):
     module_ = importlib.import_module(module)
     class_ = getattr(module_, cls_name)
     return class_
+
 
 def _create_instance_from_type_str(type_str, **kwargs):
     class_ = _get_cls_from_type_str(type_str)
@@ -192,7 +192,7 @@ def create_instance_from_data_dict(type_instance,
         # in case of ambiguities in the type hint, the type information will be stored inside of the json file
         # the loaded type information replaces the one from the class definition.
         # see function: specify_type_for_special_cases()
-        if 'type' in data_dict:
+        if data_dict is not None and 'type' in data_dict:
             type_instance = _get_cls_from_type_str(data_dict['type'])
         if is_dataclass(type_instance):
             return deal_with_dataclass_type_instance(type_instance, data_dict)
@@ -222,7 +222,6 @@ def deal_with_dataclass_type_instance(type_instance, data_dict):
     for k, v in kwargs_init_false.items():
         instance.__setattr__(k, v)
     return instance
-
 
 
 # import h5py
@@ -299,9 +298,20 @@ def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
 
 
 def replace_all(text, dic):
-    for i, j in dic.items():
-        text = text.replace(i, j)
-    return text
+    # slow version:
+    # for i, j in dic.items():
+    #     text = text.replace(i, j)
+    # return text
+    # fast version:
+    # https://www.oreilly.com/library/view/python-cookbook/0596001673/ch03s15.html
+    # Create a regular expression from all of the dictionary keys
+    if len(dic) == 0:
+        return text
+    else:
+        import re
+        regex = re.compile("|".join(map(re.escape, dic.keys())))
+        # For each match, look up the corresponding value in the dictionary
+        return regex.sub(lambda match: dic[match.group(0)], text)
 
 
 class MyJsonEncoder(json.JSONEncoder):
@@ -336,8 +346,9 @@ def add_suffix(file: Path, suffix: str):
     return file.with_name(f'{file.name}{suffix}')
 
 
-def create_json_from_instance(instance):
-    dict_light, dict_heavy = dataclass_to_dicts(instance)
+def create_json_from_instance(instance, explicit: list[str] = None):
+    explicit = () if explicit is None else tuple(explicit)
+    dict_light, dict_heavy = dataclass_to_dicts(instance, explicit=explicit)
     json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
     replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
                     for key, value in dict_heavy.items()}
@@ -345,9 +356,9 @@ def create_json_from_instance(instance):
     return json_light
 
 
-def store(instance, file=None):
+def store(instance, file=None, explicit: list[str] = None):
     file = Path(file)
-    json_light = create_json_from_instance(instance)
+    json_light = create_json_from_instance(instance, explicit)
     dict_files = {file.name + '.json': json_light}
     store_files_to_zip(file, dict_files)
 
@@ -385,14 +396,14 @@ class Persistent:  # on difference between persitable and persistent: https://wi
     def _extract_file_name(file: Path) -> str:
         return file.name  # file.stem
 
-    def to_json(self) -> str:
-        json_light = create_json_from_instance(self)
+    def to_json(self, explicit: list[str] = None) -> str:
+        json_light = create_json_from_instance(self, explicit=explicit)
         return json_light
 
-    def _store_to_disk_compressed_including_single_json_file(self, file):
+    def _store_to_disk_compressed_including_single_json_file(self, file, **kwargs):
         # todo remove uncompressed file if exists
         file = self._deal_with_file(file)
-        json_light = self.to_json()
+        json_light = self.to_json(**kwargs)
         dict_files = {self._extract_file_name(file) + '.json': json_light}
         store_files_to_zip(file, dict_files)
 
@@ -405,15 +416,15 @@ class Persistent:  # on difference between persitable and persistent: https://wi
     #     dict_files[self._extract_file_name(file)] = json_light
     #     store_files_to_zip(file, dict_files)
 
-    def _store_to_disk_uncompressed_single_json_file(self, file):
-        json_light = self.to_json()
+    def _store_to_disk_uncompressed_single_json_file(self, file, **kwargs):
+        json_light = self.to_json(**kwargs)
         write_string_to_file(json_light, add_suffix(file, '.json'))
 
-    def store(self, file, mode: Mode = Mode.ZIP):
+    def store(self, file, mode: Mode = Mode.ZIP, explicit: list[str] = ()):
         if mode is Mode.ZIP:
-            self._store_to_disk_compressed_including_single_json_file(file)
+            self._store_to_disk_compressed_including_single_json_file(file, explicit=explicit)
         elif mode is Mode.JSON:
-            self._store_to_disk_uncompressed_single_json_file(file)
+            self._store_to_disk_uncompressed_single_json_file(file, explicit=explicit)
         else:
             raise NotImplementedError()
 
@@ -448,12 +459,14 @@ class Persistent:  # on difference between persitable and persistent: https://wi
 
     @classmethod
     def from_json(cls, json_: str) -> T:
-        return create_instance_from_data_dict(cls, json.loads(json_))
+        return create_instance_from_data_dict(cls, json.loads(json_, object_hook=my_decoder))
 
     def update(self, file):
         """
-        Updates all fields of an dataclass instance with data from disk, expcept fields mith metadata={'exclude': True}.
+        Updates all fields of an dataclass instance with data from disk, except:
+            - fields with metadata={'exclude': True}.
         Those excluded fields are not updated.
+
         :param file:
         :return:
         """
