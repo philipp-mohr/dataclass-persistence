@@ -375,6 +375,11 @@ def _replace_not_excluded_fields(old, new):
         if is_dataclass(old.__getattribute__(key)):
             if not val.metadata.get(EXCLUDE_KEY, False):
                 _replace_not_excluded_fields(old.__getattribute__(key), new.__getattribute__(key))
+        elif old.__getattribute__(key) is None:
+            old.__setattr__(key, new.__getattribute__(key))
+        elif hasattr(val.type, '__origin__') and val.type.__origin__ == list:
+            for _old, _new in zip(old.__getattribute__(key), new.__getattribute__(key)):
+                _replace_not_excluded_fields(_old, _new)
         else:
             if not val.metadata.get(EXCLUDE_KEY, False):
                 old.__setattr__(key, new.__getattribute__(key))

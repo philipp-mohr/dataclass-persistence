@@ -93,11 +93,12 @@ def test_do_not_store_load_excluded_fields(file_dir):
 class NestedClass(Persistent):
     cls_a: Class = field(metadata=EXCLUDE)
     cls_b: Class
+    cls_c: list[Class]
     param_a: str = field(metadata=EXCLUDE)
 
 
 def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
-    config = NestedClass(Class('a', 'b'), Class('c', 'd'), 'e')
+    config = NestedClass(Class('a', 'b'), Class('c', 'd'), [Class(param_a='a', param_b='b')],'e')
     file = file_dir.joinpath('config_without_excluded_field')
     config.store(file=file)
     loaded = NestedClass.load(file=file)
@@ -108,6 +109,9 @@ def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
     assert config.cls_a == Class('a', 'b')
     assert config.cls_b.param_b == 'd'
     assert config.param_a == 'e'
+    config.update(file)
+    # do not update excluded fields
+    assert config.cls_c[0].param_b == 'b'
 
 
 @dataclass
