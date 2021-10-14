@@ -378,8 +378,13 @@ def _replace_not_excluded_fields(old, new):
         elif old.__getattribute__(key) is None:
             old.__setattr__(key, new.__getattribute__(key))
         elif hasattr(val.type, '__origin__') and val.type.__origin__ == list:
-            for _old, _new in zip(old.__getattribute__(key), new.__getattribute__(key)):
-                _replace_not_excluded_fields(_old, _new)
+            list_old, list_new = old.__getattribute__(key), new.__getattribute__(key)
+            # if list sizes do not agree, take the new list
+            if len(list_old) != len(list_new):
+                old.__setattr__(key, list_new)
+            else:
+                for _old, _new in zip(list_old, list_new):
+                    _replace_not_excluded_fields(_old, _new)
         else:
             if not val.metadata.get(EXCLUDE_KEY, False):
                 old.__setattr__(key, new.__getattribute__(key))

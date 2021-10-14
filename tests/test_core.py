@@ -112,6 +112,11 @@ def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
     config.update(file)
     # do not update excluded fields
     assert config.cls_c[0].param_b == 'b'
+    # in cases of different list sizes, .update() shall use the loaded list.
+    loaded.cls_c.append(Class(param_a='a', param_b='b'))
+    loaded.store(file)
+    config.update(file)
+    assert len(config.cls_c) == 2
 
 
 @dataclass
