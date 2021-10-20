@@ -380,7 +380,7 @@ def _replace_not_excluded_fields(old, new):
         elif hasattr(val.type, '__origin__') and val.type.__origin__ == list:
             list_old, list_new = old.__getattribute__(key), new.__getattribute__(key)
             # if list sizes do not agree, take the new list
-            if len(list_old) != len(list_new):
+            if len(list_old) != len(list_new) or (len(list_new) > 0 and not is_dataclass(list_new[0])):
                 old.__setattr__(key, list_new)
             else:
                 for _old, _new in zip(list_old, list_new):

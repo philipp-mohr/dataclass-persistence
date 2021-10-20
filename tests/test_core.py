@@ -75,6 +75,7 @@ def test_store_load_sim_data(file_dir, mode):
 class Class(Persistent):
     param_a: str
     param_b: str = field(metadata=EXCLUDE)
+    param_c: list[np.ndarray] = None
 
 
 def test_do_not_store_load_excluded_fields(file_dir):
@@ -98,7 +99,8 @@ class NestedClass(Persistent):
 
 
 def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
-    config = NestedClass(Class('a', 'b'), Class('c', 'd'), [Class(param_a='a', param_b='b')],'e')
+    config = NestedClass(Class('a', 'b'), Class('c', 'd'), [Class(param_a='a', param_b='b',
+                                                                  param_c=[np.array([0])])], 'e')
     file = file_dir.joinpath('config_without_excluded_field')
     config.store(file=file)
     loaded = NestedClass.load(file=file)
