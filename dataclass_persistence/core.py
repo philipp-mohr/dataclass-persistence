@@ -54,6 +54,7 @@ def if_key_exists_increment_id(dic: dict, name: str, id: int = 1):
 
 built_in_types = [int, float, str, bool, complex, type(None)]
 built_in_types_names = [t.__name__ for t in built_in_types]
+built_in_types_names_class = {name: _class for name, _class in zip(built_in_types_names, built_in_types)}
 
 
 def specify_type_for_special_cases(json_object, _field, value):
@@ -151,6 +152,9 @@ def dataclass_to_dicts(instance,
 
 def _get_cls_from_type_str(type_str, **kwargs):
     # https://stackoverflow.com/questions/4821104/dynamic-instantiation-from-string-name-of-a-class-in-dynamically-imported-module
+    # if type_str in built_in_types_names:
+    #     return built_in_types_names_class[type_str]
+    # else:
     module, cls_name = type_str.split('|')
     module_ = importlib.import_module(module)
     class_ = getattr(module_, cls_name)
@@ -164,7 +168,15 @@ def _create_instance_from_type_str(type_str, **kwargs):
 
 def create_instance_from_data_dict(type_instance,
                                    data_dict):
-    if hasattr(type_instance, '__origin__'):
+    if type_instance in [np.ndarray, np.array]:
+        return data_dict
+    elif type_instance in built_in_types:
+        return data_dict
+    # above are cases where data_dict is an elementary type, where no further recursion is required
+    # below are cases where data_dict encodes a container type like dataclasses, Enums, tuple, list, Union
+    elif isinstance(type_instance, type(Enum)):
+        return type_instance[data_dict]
+    elif hasattr(type_instance, '__origin__'):
         # https://stackoverflow.com/questions/48572831/how-to-access-the-type-arguments-of-typing-generic
         if type_instance.__origin__ == tuple:
             return tuple([create_instance_from_data_dict(type_instance.__args__[0], item)
@@ -176,18 +188,15 @@ def create_instance_from_data_dict(type_instance,
             return {key: create_instance_from_data_dict(type_instance.__args__[0], item)
                     for key, item in data_dict.items()}
         if type_instance.__origin__ == Union:
-            for arg in type_instance.__args__:
+            if data_dict is not None and 'type' in data_dict:
                 if data_dict['type'] in built_in_types_names:
-                    return create_instance_from_data_dict(arg, data_dict['value'])
-                elif data_dict['type'] in str(f'{arg.__module__}|{arg.__name__}'):
-                    return create_instance_from_data_dict(arg, data_dict)
-            raise ValueError('specific type not found in given Union type')
-    elif type_instance in [np.ndarray, np.array]:
-        return data_dict
-    elif type_instance in built_in_types:
-        return data_dict
-    elif isinstance(type_instance, type(Enum)):
-        return type_instance[data_dict]
+                    return create_instance_from_data_dict(built_in_types_names_class[data_dict['type']],
+                                                          data_dict['value'])
+                else:
+                    type_instance = _get_cls_from_type_str(data_dict['type'])
+                    return create_instance_from_data_dict(type_instance, data_dict)
+            else:
+                raise NotImplementedError()
     else:
         # in case of ambiguities in the type hint, the type information will be stored inside of the json file
         # the loaded type information replaces the one from the class definition.

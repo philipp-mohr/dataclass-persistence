@@ -230,15 +230,21 @@ class MyImpl(MyBase):
 
 
 @dataclass
+class MyImpl2(MyBase):
+    a: int = 5
+
+
+@dataclass
 class DataclassWithSubClass(Persistent):
     val: MyBase = None
     val2: MyBase = None
     val3: list[MyBase] = None
     val4: tuple[MyBase] = None
+    val5: Union[MyBase, MyImpl2] = None
 
 
 def test_restore_subclass_of_abstract_base_class():
-    c = DataclassWithSubClass(val=MyImpl(), val3=[MyImpl(5)], val4=(MyImpl(5),))
+    c = DataclassWithSubClass(val=MyImpl(), val3=[MyImpl(5)], val4=(MyImpl(5),), val5=MyImpl(a=7))
     json_ = c.to_json()
     c_loaded = DataclassWithSubClass.from_json(json_)
     assert c == c_loaded  # performs nested comparison
