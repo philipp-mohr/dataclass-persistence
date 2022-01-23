@@ -6,6 +6,7 @@ from dataclasses import dataclass, is_dataclass, fields
 from enum import Enum
 from functools import partial
 from pathlib import Path
+from types import UnionType
 from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
 import numpy as np
@@ -14,6 +15,8 @@ import numpy as np
 # e.g. var_a: str = field(metadata=EXCLUDE)
 # add other meta data through dictionary union operator:
 # e.g. var_a: str = field(metadata=EXCLUDE|{'other_metakey': some_val})
+from strenum import StrEnum
+
 EXCLUDE_KEY = 'exclude'
 EXCLUDE = {EXCLUDE_KEY: True}
 
@@ -60,8 +63,10 @@ built_in_types_names_class = {name: _class for name, _class in zip(built_in_type
 def specify_type_for_special_cases(json_object, _field, value):
     # example cases:
     # if field is of type Union[int, str] the type at reconstruction time would be ambiguous and must be stored.
+    # if field is of type int|str the type at reconstruction time would be ambiguous and must be stored.
     # if field is of type Base and value is of type SubClass(Base), the path to the subclass must be stored.
     conditions = [hasattr(_field.type, '__origin__') and _field.type.__origin__ == Union,
+                  isinstance(_field.type, UnionType),
                   # required for future imports: and type(value).__name__ != _field.type
                   type(value) != _field.type and value is not None and type(value).__name__ != _field.type]
     if any(conditions):
@@ -73,6 +78,9 @@ def specify_type_for_special_cases(json_object, _field, value):
                     _json_object['type'] = f'{type(_value).__module__}|{type(_value).__name__}'
         elif type(value) in built_in_types:
             json_object[_field.name] = {'type': str(type(value).__name__),
+                                        'value': json_object[_field.name]}
+        elif isinstance(value, StrEnum):  # e.g. if type is specified with str|SomeStrEnum
+            json_object[_field.name] = {'type': f'{type(value).__module__}|{type(value).__name__}',
                                         'value': json_object[_field.name]}
 
 
@@ -166,6 +174,23 @@ def _create_instance_from_type_str(type_str, **kwargs):
     return class_(**kwargs)
 
 
+def deal_with_creation_for_union_type(data_dict):
+    if data_dict is not None and 'type' in data_dict:
+        if data_dict['type'] in built_in_types_names:
+            return create_instance_from_data_dict(built_in_types_names_class[data_dict['type']],
+                                                  data_dict['value'])
+        else:
+            type_instance = _get_cls_from_type_str(data_dict['type'])
+            if issubclass(type_instance, Enum):
+                return create_instance_from_data_dict(type_instance,
+                                                      data_dict['value'])
+            else:
+                type_instance = _get_cls_from_type_str(data_dict['type'])
+                return create_instance_from_data_dict(type_instance, data_dict)
+    else:
+        raise NotImplementedError()
+
+
 def create_instance_from_data_dict(type_instance,
                                    data_dict):
     if type_instance in [np.ndarray, np.array]:
@@ -188,15 +213,9 @@ def create_instance_from_data_dict(type_instance,
             return {key: create_instance_from_data_dict(type_instance.__args__[0], item)
                     for key, item in data_dict.items()}
         if type_instance.__origin__ == Union:
-            if data_dict is not None and 'type' in data_dict:
-                if data_dict['type'] in built_in_types_names:
-                    return create_instance_from_data_dict(built_in_types_names_class[data_dict['type']],
-                                                          data_dict['value'])
-                else:
-                    type_instance = _get_cls_from_type_str(data_dict['type'])
-                    return create_instance_from_data_dict(type_instance, data_dict)
-            else:
-                raise NotImplementedError()
+            return deal_with_creation_for_union_type(data_dict)
+    elif isinstance(type_instance, UnionType):
+        return deal_with_creation_for_union_type(data_dict)
     else:
         # in case of ambiguities in the type hint, the type information will be stored inside of the json file
         # the loaded type information replaces the one from the class definition.

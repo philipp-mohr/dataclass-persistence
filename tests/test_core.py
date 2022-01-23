@@ -1,18 +1,23 @@
 from abc import ABC
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
 
 import numpy as np
 import json
 from pathlib import Path
 from typing import Union, Dict, List, Tuple, Optional
 
+from strenum import StrEnum
+
 from dataclass_persistence import Persistent, EXCLUDE, Mode, EXPLICIT
 from pytest import fixture, mark
 
 
 # some example scenario, where simulation data like configuration and results are stored in nested hierarchy
-
+def verify_load_store(c: Persistent, cls):
+    json_ = c.to_json()
+    c_loaded = cls.from_json(json_)
+    assert c == c_loaded  # performs nested comparison
 
 @dataclass
 class ResultSystemCustom:
@@ -245,9 +250,7 @@ class DataclassWithSubClass(Persistent):
 
 def test_restore_subclass_of_abstract_base_class():
     c = DataclassWithSubClass(val=MyImpl(), val3=[MyImpl(5)], val4=(MyImpl(5),), val5=MyImpl(a=7))
-    json_ = c.to_json()
-    c_loaded = DataclassWithSubClass.from_json(json_)
-    assert c == c_loaded  # performs nested comparison
+    verify_load_store(c, DataclassWithSubClass)
 
 
 @dataclass
@@ -259,9 +262,7 @@ class MyClassInitFalse(Persistent):
 def test_restore_init_false_fields():
     my = MyClassInitFalse()
     my.b = 10
-    my_json = my.to_json()
-    my2 = MyClassInitFalse.from_json(my_json)
-    assert my == my2
+    verify_load_store(my, MyClassInitFalse)
 
 
 @dataclass
@@ -297,3 +298,18 @@ class MyClassLargeFields(Persistent):
 def test_separate_large_fields():
     my = MyClassLargeFields(a=np.array(100000))
     my.store()  # goal: only put ID inside of json file which point to some SEPARATE file which contains the data
+
+
+class MyStrEnum(StrEnum):
+    opt1 = auto()
+    opt2 = auto()
+
+
+@dataclass
+class MyDataClassWithStrEnum(Persistent):
+    opt: str | MyStrEnum = MyStrEnum.opt1
+
+
+def test_field_with_str_enum():
+    verify_load_store(MyDataClassWithStrEnum(MyStrEnum.opt2), MyDataClassWithStrEnum)
+    verify_load_store(MyDataClassWithStrEnum('opt2'), MyDataClassWithStrEnum)
