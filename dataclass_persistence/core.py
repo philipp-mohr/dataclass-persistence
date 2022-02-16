@@ -21,11 +21,18 @@ EXCLUDE_KEY = 'exclude'
 EXCLUDE = {EXCLUDE_KEY: True}
 
 # fields which use the explicit key, are only stored if identifier is explicitly given in store method.
-EXPLICIT_KEY = 'exclude'
+EXPLICIT_KEY = 'explicit'
 
 
 def EXPLICIT(identifier: str):
     return {EXPLICIT_KEY: identifier}
+
+
+SEPARATE_KEY = 'separate'
+
+
+def SEPARATE(size_bytes=0):
+    return {SEPARATE_KEY: size_bytes}
 
 
 def write_string_to_file(data_str: str, file, b_logging: bool = True):
@@ -97,9 +104,15 @@ def do_preserve_field(field_, explicit: tuple[str]):
     :param explicit:
     :return:
     """
+    do_exclude = field_.metadata.get(EXCLUDE_KEY, False)
+    if do_exclude:
+        return False
+
     identifier = field_.metadata.get(EXPLICIT_KEY, '')
-    explict_preserve = identifier in explicit or identifier == ''
-    return not field_.metadata.get(EXCLUDE_KEY, False) or explict_preserve
+    if identifier in explicit or identifier == '':
+        return True
+    else:
+        return False
 
 
 def dataclass_to_dicts(instance,
@@ -126,7 +139,8 @@ def dataclass_to_dicts(instance,
             if do_preserve_field(_field, explicit):
                 json_object[_field.name] = dataclass_to_dicts(value,
                                                               dict_heavy,
-                                                              _field.name)[0]
+                                                              _field.name,
+                                                              explicit)[0]
                 specify_type_for_special_cases(json_object, _field, value)
             else:
                 json_object[_field.name] = None
@@ -384,6 +398,29 @@ def create_json_from_instance(instance, explicit: list[str] = None):
     return json_light
 
 
+def _deal_with_file(file: Union[Path, str]) -> Path:
+    """
+    Ensures that file suffix is valid.
+
+    If file is string it is converted to Path object
+    If no suffix is provided it will be changed to .zip
+
+    :param file:
+    :return:
+    """
+    if isinstance(file, Path):
+        file = file
+    elif isinstance(file, str):
+        file = Path(file)
+    else:
+        raise NotImplementedError('file format not supported')
+
+    # if no suffix provided use .zip by default
+    if file.suffix not in ['.zip', '.json']:
+        file = Path(str(file) + '.zip')
+    return file
+
+
 def store(instance, file=None, explicit: list[str] = None):
     file = Path(file)
     json_light = create_json_from_instance(instance, explicit)
@@ -392,8 +429,10 @@ def store(instance, file=None, explicit: list[str] = None):
 
 
 def load(file):
+    file = _deal_with_file(file)
+    assert file.suffixes[-1] == '.zip'
     file = Path(file)
-    with zipfile.ZipFile(add_suffix(file, '.zip'), 'r') as zipped_f:
+    with zipfile.ZipFile(file, 'r') as zipped_f:
         dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
     return dict_data[0]
 
@@ -425,12 +464,6 @@ class Mode(Enum):  # output file format
 
 class Persistent:  # on difference between persitable and persistent: https://wikidiff.com/persistent/persistable
     @staticmethod
-    def _deal_with_file(file: Union[Path, str]) -> Path:
-        if not isinstance(file, Path):
-            file = Path(file)
-        return file
-
-    @staticmethod
     def _extract_file_name(file: Path) -> str:
         return file.name  # file.stem
 
@@ -440,7 +473,7 @@ class Persistent:  # on difference between persitable and persistent: https://wi
 
     def _store_to_disk_compressed_including_single_json_file(self, file, **kwargs):
         # todo remove uncompressed file if exists
-        file = self._deal_with_file(file)
+        file = _deal_with_file(file)
         json_light = self.to_json(**kwargs)
         dict_files = {self._extract_file_name(file) + '.json': json_light}
         store_files_to_zip(file, dict_files)
@@ -479,17 +512,20 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         return create_instance_from_data_dict(cls, dict_data)
 
     @classmethod
-    def load(cls: Type[T], file) -> T:
-        file = cls._deal_with_file(file)
-        # remove suffix if exists
-        if file.suffix in ['.json', '.zip']:
-            file = Path(str(file).replace(file.suffix, ''))
-        if Path(str(file) + '.json').exists():  # uncompressed case
-            return cls._load_from_disk_uncompressed(file)
-        elif Path(str(file) + '.zip').exists():  # compressed case
-            return cls._load_from_disk_compressed(file)
-        else:
+    def load(cls: Type[T], file: Path | str) -> T:
+        file = _deal_with_file(file)
+
+        # check if file exists
+        if not file.exists():
             raise FileNotFoundError('No file with supported type found')
+
+        # depending on suffix perform loading with compressed or uncompressed mode
+        if file.suffix == '.zip':  # uncompressed case
+            return cls._load_from_disk_compressed(file)
+        elif file.suffix == '.json':  # compressed case
+            return cls._load_from_disk_uncompressed(file)
+        else:
+            raise NotImplementedError(f'File with suffix {file.suffix} not supported.')
 
     @staticmethod
     def load_as_dict(file):
@@ -498,6 +534,10 @@ class Persistent:  # on difference between persitable and persistent: https://wi
     @classmethod
     def from_json(cls, json_: str) -> T:
         return create_instance_from_data_dict(cls, json.loads(json_, object_hook=my_decoder))
+
+    @classmethod
+    def load_json(cls, json_: str) -> T:
+        return cls.from_json(json_)
 
     def update(self, file):
         """

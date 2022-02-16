@@ -9,7 +9,7 @@ from typing import Union, Dict, List, Tuple, Optional
 
 from strenum import StrEnum
 
-from dataclass_persistence import Persistent, EXCLUDE, Mode, EXPLICIT
+from dataclass_persistence import Persistent, EXCLUDE, Mode, EXPLICIT, SEPARATE
 from pytest import fixture, mark
 
 
@@ -18,6 +18,7 @@ def verify_load_store(c: Persistent, cls):
     json_ = c.to_json()
     c_loaded = cls.from_json(json_)
     assert c == c_loaded  # performs nested comparison
+
 
 @dataclass
 class ResultSystemCustom:
@@ -77,35 +78,32 @@ def test_store_load_sim_data(file_dir, mode):
 
 
 @dataclass
-class Class(Persistent):
+class Class1(Persistent):
     param_a: str
     param_b: str = field(metadata=EXCLUDE)
     param_c: list[np.ndarray] = None
 
 
 def test_do_not_store_load_excluded_fields(file_dir):
-    config = Class('a', 'b')
-    file = file_dir.joinpath('config_without_private_field')
-    config._store_to_disk_uncompressed_single_json_file(file=file)
-    with open(str(file.with_suffix('.json')), 'r') as data_file:
-        json_string = '\n'.join(data_file.readlines())
-        dict_data = json.loads(json_string)
+    cfg = Class1('a', 'b')
+    cfg_json = cfg.to_json()
+    dict_data = json.loads(cfg_json)
     assert dict_data['param_b'] is None
-    config_loaded = Class.load(file)
-    assert config_loaded.param_b is None
+    cfg_loaded = Class1.load_json(cfg_json)
+    assert cfg_loaded.param_b is None
 
 
 @dataclass
 class NestedClass(Persistent):
-    cls_a: Class = field(metadata=EXCLUDE)
-    cls_b: Class
-    cls_c: list[Class]
+    cls_a: Class1 = field(metadata=EXCLUDE)
+    cls_b: Class1
+    cls_c: list[Class1]
     param_a: str = field(metadata=EXCLUDE)
 
 
 def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
-    config = NestedClass(Class('a', 'b'), Class('c', 'd'), [Class(param_a='a', param_b='b',
-                                                                  param_c=[np.array([0])])], 'e')
+    config = NestedClass(Class1('a', 'b'), Class1('c', 'd'), [Class1(param_a='a', param_b='b',
+                                                                     param_c=[np.array([0])])], 'e')
     file = file_dir.joinpath('config_without_excluded_field')
     config.store(file=file)
     loaded = NestedClass.load(file=file)
@@ -113,17 +111,29 @@ def test_replace_fields_of_instance_which_are_not_excluded(file_dir):
     assert loaded.cls_b.param_b is None
     assert loaded.param_a is None
     config.update(file=file)
-    assert config.cls_a == Class('a', 'b')
+    assert config.cls_a == Class1('a', 'b')
     assert config.cls_b.param_b == 'd'
     assert config.param_a == 'e'
     config.update(file)
     # do not update excluded fields
     assert config.cls_c[0].param_b == 'b'
     # in cases of different list sizes, .update() shall use the loaded list.
-    loaded.cls_c.append(Class(param_a='a', param_b='b'))
+    loaded.cls_c.append(Class1(param_a='a', param_b='b'))
     loaded.store(file)
     config.update(file)
     assert len(config.cls_c) == 2
+
+
+@dataclass
+class Class2(Persistent):
+    a: str = 'abc'
+
+
+def test_deal_with_multiple_dots_in_file_name(file_dir):
+    my = Class2()
+    my.store((_f := file_dir.joinpath('file_a=0.1_b=0.3')))
+    my_loaded = Class2.load(_f)
+    assert my == my_loaded
 
 
 @dataclass
@@ -266,8 +276,15 @@ def test_restore_init_false_fields():
 
 
 @dataclass
+class MyClass2FilterFields(Persistent):
+    a: np.ndarray = field(default=None, metadata=EXPLICIT('large_data'))
+
+
+@dataclass
 class MyClassFilterFields(Persistent):
     a: np.ndarray = field(default=None, metadata=EXPLICIT('large_data'))
+    b: MyClass2FilterFields = None
+    c: list[MyClass2FilterFields] = field(default=None, metadata=EXPLICIT('large_data'))
 
 
 def test_preserve_fields_only_if_explicitly_required(file_dir, request):
@@ -275,29 +292,43 @@ def test_preserve_fields_only_if_explicitly_required(file_dir, request):
     # Those fields may be marked with the 'explicit' key inside inside of the metadata with some identifier
     # e.g. 'large_data'.
     # ONLY if this identifier is provided in store(explicit=['large_data',...]]), the field will be preserved.
-    my = MyClassFilterFields(a=np.array([100000]))
+    my = MyClassFilterFields(a=np.array([100000]),
+                             b=MyClass2FilterFields(np.array([100000])),
+                             c=[MyClass2FilterFields(np.array([100000]))])
+    json3 = my.to_json()  # by default explicit marked fields are not stored
     my.store((_f := file_dir.joinpath(request.node.name)), explicit=['large_data'])
     json2 = my.to_json(explicit=['large_data'])
-    json3 = my.to_json()  # by default explicit marked fields are not stored
     my_loaded = MyClassFilterFields.load(_f)
     my_loaded2 = MyClassFilterFields.from_json(json2)
     my_loaded3 = MyClassFilterFields.from_json(json3)
-    assert my_loaded.a == my_loaded2.a
+
+    assert my_loaded.a is not None and my_loaded.a == my_loaded2.a
     assert my_loaded3.a is None
 
+    assert my_loaded.b.a is not None and my_loaded.b.a == my_loaded2.b.a
+    assert my_loaded3.b.a is None
 
-SEPARATE = {'separate': True}
+    assert my_loaded.c is not None and my_loaded.c == my_loaded2.c
+    assert my_loaded3.c is None
 
 
 @dataclass
 class MyClassLargeFields(Persistent):
-    a: Optional[np.ndarray] = field(default=None, metadata=SEPARATE)
+    a: Optional[np.ndarray] = field(default=None, metadata=SEPARATE())
 
 
 @mark.skip()
-def test_separate_large_fields():
+def test_separate_large_fields(request, file_dir):
+    # goal: only put ID inside of json file which point to some SEPARATE file which contains the data
     my = MyClassLargeFields(a=np.array(100000))
-    my.store()  # goal: only put ID inside of json file which point to some SEPARATE file which contains the data
+    my.store((_f := file_dir.joinpath(request.node.name)))
+    import zipfile
+    from dataclass_persistence import my_decoder
+    with zipfile.ZipFile(_f.with_suffix('.zip'), 'r') as zipped_f:
+        zipped_f.filelist[1].read()  # at location [1] we expect the data in array marked with SEPARATE()
+        [zipped_f.read(item) for item in zipped_f.filelist]
+        dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
+    my_loaded = MyClassLargeFields.load(_f)
 
 
 class MyStrEnum(StrEnum):
