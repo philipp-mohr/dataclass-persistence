@@ -1,6 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from fractions import Fraction
 
 import numpy as np
 import json
@@ -14,9 +15,11 @@ from pytest import fixture, mark
 
 
 # some example scenario, where simulation data like configuration and results are stored in nested hierarchy
-def verify_load_store(c: Persistent, cls):
+def verify_load_store(c: Persistent, cls_=None):
+    if cls_ is None:
+        cls_ = type(c)
     json_ = c.to_json()
-    c_loaded = cls.from_json(json_)
+    c_loaded = cls_.from_json(json_)
     assert c == c_loaded  # performs nested comparison
 
 
@@ -342,5 +345,19 @@ class MyDataClassWithStrEnum(Persistent):
 
 
 def test_field_with_str_enum():
-    verify_load_store(MyDataClassWithStrEnum(MyStrEnum.opt2), MyDataClassWithStrEnum)
-    verify_load_store(MyDataClassWithStrEnum('opt2'), MyDataClassWithStrEnum)
+    verify_load_store(MyDataClassWithStrEnum(MyStrEnum.opt2))
+    verify_load_store(MyDataClassWithStrEnum('opt2'))
+
+
+class MyEnum2(Enum):
+    SOME_ENUM_NAME: Fraction = Fraction(1, 3)
+
+
+@dataclass
+class CfgWithFraction(Persistent):
+    code_rate: MyEnum2 = MyEnum2.SOME_ENUM_NAME
+    number: Fraction = Fraction(1, 3)
+
+
+def test_various_field_types():
+    verify_load_store(CfgWithFraction())

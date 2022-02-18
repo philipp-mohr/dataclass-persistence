@@ -169,7 +169,9 @@ def dataclass_to_dicts(instance,
     elif isinstance(instance, Enum):
         return _dataclass_to_dicts(instance.name)
     else:
-        raise ValueError('Case not implemented')
+        # if type not supported, then fall back solution is to store string representation of class
+        return _dataclass_to_dicts(str(instance))
+        # raise ValueError('Case not implemented')
 
 
 def _get_cls_from_type_str(type_str, **kwargs):
@@ -239,7 +241,14 @@ def create_instance_from_data_dict(type_instance,
         if is_dataclass(type_instance):
             return deal_with_dataclass_type_instance(type_instance, data_dict)
         else:
-            raise NotImplementedError()
+            try:
+                instance = type_instance(data_dict)
+            except Exception as e:
+                logging.warning(f'Error occurred when creating instance of type {type_instance} '
+                                f'with string representation:{e}')
+                instance = None
+            return instance
+            # raise NotImplementedError()
 
 
 def deal_with_dataclass_type_instance(type_instance, data_dict):
