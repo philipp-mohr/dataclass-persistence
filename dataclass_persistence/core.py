@@ -474,7 +474,7 @@ class Mode(Enum):  # output file format
 class Persistent:  # on difference between persitable and persistent: https://wikidiff.com/persistent/persistable
     @staticmethod
     def _extract_file_name(file: Path) -> str:
-        return file.name  # file.stem
+        return file.stem
 
     def to_json(self, explicit: list[str] = None) -> str:
         json_light = create_json_from_instance(self, explicit=explicit)
