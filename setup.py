@@ -22,7 +22,7 @@ URL = 'https://github.com/piveloper/dataclass-persistence'
 EMAIL = 'piveloper@gmail.com'
 AUTHOR = 'piveloper'
 REQUIRES_PYTHON = '>=3.10.0'
-VERSION = '0.1.2'
+VERSION = '0.1.3'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
@@ -114,7 +114,7 @@ class UploadCommand(LocalCommand):
                   'Tests failed. Upload to PyPI aborted...')
         else:
             self.status('Uploading the package to PyPI via Twine…')
-            os.system('twine upload dist/*')
+            os.system('twine upload dist/* --repository dataclass_persistence ')
 
             self.status('Pushing git tags…')
             os.system('git tag v{0}'.format(about['__version__']))
