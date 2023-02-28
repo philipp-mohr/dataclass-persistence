@@ -237,7 +237,10 @@ def create_instance_from_data_dict(type_instance,
         # the loaded type information replaces the one from the class definition.
         # see function: specify_type_for_special_cases()
         if data_dict is not None and 'type' in data_dict:
-            type_instance = _get_cls_from_type_str(data_dict['type'])
+            try:
+                type_instance = _get_cls_from_type_str(data_dict['type'])
+            except Exception as er:
+                logging.info(er)
         if is_dataclass(type_instance):
             return deal_with_dataclass_type_instance(type_instance, data_dict)
         else:
