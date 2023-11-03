@@ -397,7 +397,8 @@ def add_suffix(file: Path, suffix: str):
     :param suffix:
     :return:
     """
-    return file.with_name(f'{file.name}{suffix}')
+    _file = Path(file)
+    return _file.with_name(f'{_file.name}{suffix}')
 
 
 def create_json_from_instance(instance, explicit: list[str] = None):
@@ -503,10 +504,10 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         json_light = self.to_json(**kwargs)
         write_string_to_file(json_light, add_suffix(file, '.json'))
 
-    def store(self, file, mode: Mode = Mode.ZIP, explicit: list[str] = ()):
-        if mode is Mode.ZIP:
+    def store(self, file, mode: str|Mode = Mode.ZIP, explicit: list[str] = ()):
+        if mode in [Mode.ZIP, 'zip']:
             self._store_to_disk_compressed_including_single_json_file(file, explicit=explicit)
-        elif mode is Mode.JSON:
+        elif mode in [Mode.JSON, 'json']:
             self._store_to_disk_uncompressed_single_json_file(file, explicit=explicit)
         else:
             raise NotImplementedError()
