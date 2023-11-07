@@ -314,24 +314,30 @@ def test_preserve_fields_only_if_explicitly_required(file_dir, request):
     assert my_loaded.c is not None and my_loaded.c == my_loaded2.c
     assert my_loaded3.c is None
 
+@dataclass
+class NestedContainer(Persistent):
+    a: np.ndarray = None
 
 @dataclass
 class MyClassLargeFields(Persistent):
-    a: Optional[np.ndarray] = field(default=None, metadata=SEPARATE())
+    a: np.ndarray = None
+    b: np.ndarray = None
+    nest: NestedContainer = None
 
 
-@mark.skip()
-def test_separate_large_fields(request, file_dir):
+def test_save_large_arrays_in_separate_file(request, file_dir):
     # goal: only put ID inside of json file which point to some SEPARATE file which contains the data
-    my = MyClassLargeFields(a=np.array(100000))
+    # numpy array with size larger than 100 are automatically stored in separate .pkl
+    # data = {'a': np.arange(10000), 'b': np.arange(10000)}
+    # np.savez('cache/np_file.npz', **data)
+    # loaded_npz = np.load('cache/np_file.npz')
+    # data_loaded = {k: loaded_npz[k] for k in loaded_npz.files}
+    my = MyClassLargeFields(a=np.arange(1000000), b=np.arange(50),
+                            nest=NestedContainer(np.arange(100000)))
     my.store((_f := file_dir.joinpath(request.node.name)))
-    import zipfile
-    from dataclass_persistence import my_decoder
-    with zipfile.ZipFile(_f.with_suffix('.zip'), 'r') as zipped_f:
-        zipped_f.filelist[1].read()  # at location [1] we expect the data in array marked with SEPARATE()
-        [zipped_f.read(item) for item in zipped_f.filelist]
-        dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
     my_loaded = MyClassLargeFields.load(_f)
+    assert np.all(my_loaded.a == my.a)
+    assert np.all(my_loaded.b == my.b)
 
 
 class MyStrEnum(StrEnum):

@@ -9,6 +9,7 @@ from pathlib import Path
 from types import UnionType
 from typing import Tuple, Dict, Union, Type, TypeVar, get_type_hints
 
+from io import BytesIO
 import numpy as np
 
 # excludes the field from being stored to file
@@ -119,7 +120,7 @@ def dataclass_to_dicts(instance,
                        dict_heavy: Dict[str, np.ndarray] = None,
                        name_instance: str = '', explicit: tuple[str] = (),
                        ) -> Tuple[Union[None, dict, list, tuple, str, float, int, bool],
-                                  Dict[str, object]]:
+Dict[str, object]]:
     """
 
 
@@ -345,10 +346,17 @@ def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
         file_path_with_dot_zip = file_path_zip.with_suffix(file_path_zip.suffix + '.zip')
     else:
         file_path_with_dot_zip = file_path_zip
+    from io import BytesIO
+    data = BytesIO()
     with zipfile.ZipFile(file_path_with_dot_zip, 'w', compression=zipfile.ZIP_DEFLATED,
                          compresslevel=2) as zipped_f:
         for key, value in dict_files.items():
-            zipped_f.writestr(key, value)
+            if key.endswith('npz'):
+                # https://stackoverflow.com/questions/2463770/python-in-memory-zip-library
+                np.savez(data, **value)
+                zipped_f.writestr(key, data.getvalue())
+            else:
+                zipped_f.writestr(key, value)
 
 
 def replace_all(text, dic):
@@ -401,14 +409,17 @@ def add_suffix(file: Path, suffix: str):
     return _file.with_name(f'{_file.name}{suffix}')
 
 
-def create_json_from_instance(instance, explicit: list[str] = None):
+def create_json_from_instance(instance, explicit: list[str] = None, len_array_separate=1000):
     explicit = () if explicit is None else tuple(explicit)
     dict_light, dict_heavy = dataclass_to_dicts(instance, explicit=explicit)
+    dict_heavy_json = {k: v for k, v in dict_heavy.items() if len(v) < len_array_separate}
+    dict_heavy_separate = {k: v for k, v in dict_heavy.items() if len(v) >= len_array_separate}
+
     json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
     replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
-                    for key, value in dict_heavy.items()}
+                    for key, value in dict_heavy_json.items()}
     json_light = replace_all(json_light, replacements)
-    return json_light
+    return json_light, dict_heavy_separate
 
 
 def _deal_with_file(file: Union[Path, str]) -> Path:
@@ -434,11 +445,36 @@ def _deal_with_file(file: Union[Path, str]) -> Path:
     return file
 
 
-def store(instance, file=None, explicit: list[str] = None):
-    file = Path(file)
-    json_light = create_json_from_instance(instance, explicit)
-    dict_files = {file.name + '.json': json_light}
+def store(instance, file=None, explicit: list[str] = None, **kwargs):
+    # file = Path(file)
+    # json_light, dict_large_data = create_json_from_instance(instance, explicit)
+    # dict_files = {file.name + '.json': json_light}
+    # store_files_to_zip(file, dict_files)
+    file = _deal_with_file(file)
+    json_light, dict_arrays = create_json_from_instance(instance, explicit, **kwargs)
+    if isinstance(instance, Persistent):
+        dict_files = {instance._extract_file_name(file) + '.json': json_light} | {'arrays.npz': dict_arrays}
+    else:
+        dict_files = {file.name + '.json': json_light}
     store_files_to_zip(file, dict_files)
+
+
+def replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays):
+    if isinstance(dict_json, list):
+        for k, v in enumerate(dict_json):
+            if isinstance(v, str):
+                if v in dict_arrays.keys():
+                    dict_json[k] = dict_arrays[v]
+            if isinstance(v, (dict, list)):
+                replace_ids_with_arrays_in_json_dict(dict_json[k], dict_arrays)
+    if isinstance(dict_json, dict):
+        for k, v in dict_json.items():
+            if isinstance(v, str):
+                if v in dict_arrays.keys():
+                    dict_json[k] = dict_arrays[v]
+            if isinstance(v, (dict,list)):
+                replace_ids_with_arrays_in_json_dict(dict_json[k], dict_arrays)
+    return dict_json
 
 
 def load(file):
@@ -446,8 +482,16 @@ def load(file):
     assert file.suffixes[-1] == '.zip'
     file = Path(file)
     with zipfile.ZipFile(file, 'r') as zipped_f:
-        dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
-    return dict_data[0]
+        zi_main_json = [zi for zi in zipped_f.filelist if zi.filename.endswith('.json')]
+        dict_json = json.loads(zipped_f.read(zi_main_json[0].filename), object_hook=my_decoder)
+        zi_arrays = [zi for zi in zipped_f.filelist if zi.filename.endswith('.npz')]
+        if len(zi_arrays) > 0:
+            data = BytesIO(zipped_f.read(zi_arrays[0]))
+            loaded_npz = np.load(data)
+            dict_arrays = {k: loaded_npz[k] for k in loaded_npz.files}
+            # dict_data = [json.loads(zipped_f.read(item.filename), object_hook=my_decoder) for item in zipped_f.filelist]
+            replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays)
+    return dict_json
 
 
 def _replace_not_excluded_fields(old, new):
@@ -481,17 +525,12 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         return file.stem
 
     def to_json(self, explicit: list[str] = None) -> str:
-        json_light = create_json_from_instance(self, explicit=explicit)
-        return json_light
+        return create_json_from_instance(self, explicit=explicit, len_array_separate=np.inf)[0]
 
     def _store_to_disk_compressed_including_single_json_file(self, file, **kwargs):
         # todo remove uncompressed file if exists
-        file = _deal_with_file(file)
-        json_light = self.to_json(**kwargs)
-        dict_files = {self._extract_file_name(file) + '.json': json_light}
-        store_files_to_zip(file, dict_files)
+        store(self, file, **kwargs)
 
-    # todo
     # def store_to_disk_compressed_including_separate_json_files(self, file):
     #     dict_light, dict_heavy = create_light_and_heavy_part_from_instance(self)
     #     json_light = json.dumps(dict_light, indent=2)
@@ -504,7 +543,7 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         json_light = self.to_json(**kwargs)
         write_string_to_file(json_light, add_suffix(file, '.json'))
 
-    def store(self, file, mode: str|Mode = Mode.ZIP, explicit: list[str] = ()):
+    def store(self, file, mode: str | Mode = Mode.ZIP, explicit: list[str] = ()):
         if mode in [Mode.ZIP, 'zip']:
             self._store_to_disk_compressed_including_single_json_file(file, explicit=explicit)
         elif mode in [Mode.JSON, 'json']:
