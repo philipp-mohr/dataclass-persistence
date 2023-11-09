@@ -10,7 +10,7 @@ from typing import Union, Dict, List, Tuple, Optional
 
 from strenum import StrEnum
 
-from dataclass_persistence import Persistent, EXCLUDE, Mode, EXPLICIT, SEPARATE
+from dataclass_persistence import Persistent, EXCLUDE, EXPLICIT, SEPARATE
 from pytest import fixture, mark
 
 
@@ -62,7 +62,7 @@ def file_dir():
     return Path(__file__).parent.joinpath('cache')
 
 
-@mark.parametrize("mode", [Mode.ZIP, Mode.JSON])
+@mark.parametrize("mode", ['zip', 'json'])
 def test_store_load_sim_data(file_dir, mode):
     sim_data = SimDataCustom(config_system=ConfigSystemCustom(conf_component=ConfigSomeComponentA()),
                              sim_points=[SimPointCustom(params={'a': 1.0},

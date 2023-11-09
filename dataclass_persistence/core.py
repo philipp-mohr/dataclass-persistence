@@ -409,7 +409,14 @@ def add_suffix(file: Path, suffix: str):
     return _file.with_name(f'{_file.name}{suffix}')
 
 
-def create_json_from_instance(instance, explicit: list[str] = None, len_array_separate=1000):
+def may_add_suffix(file, suffix):
+    if not str(file).endswith(suffix):
+        return add_suffix(file, suffix)
+    else:
+        return Path(file)
+
+
+def _create_json_and_array_dict(instance, explicit: list[str] = None, len_array_separate=1000, **kwargs):
     explicit = () if explicit is None else tuple(explicit)
     dict_light, dict_heavy = dataclass_to_dicts(instance, explicit=explicit)
     dict_heavy_json = {k: v for k, v in dict_heavy.items() if len(v) < len_array_separate}
@@ -422,41 +429,86 @@ def create_json_from_instance(instance, explicit: list[str] = None, len_array_se
     return json_light, dict_heavy_separate
 
 
-def _deal_with_file(file: Union[Path, str]) -> Path:
+def _add_suffix_with_mode(path, valid_suffixes, mode):
+    if '.' + mode not in valid_suffixes:
+        raise ValueError()
+    return path.with_suffix('.' + str(mode))
+
+
+def _add_suffix_with_existing_file(path, valid_suffixes):
+    candidates = [path.with_suffix(_suffix) for _suffix in valid_suffixes]
+    exists = [c for c in candidates if c.exists()]
+    if len(exists) == 0:
+        path_with_suffix = path.with_suffix(valid_suffixes[0])
+    else:
+        path_with_suffix = exists[0]
+    return path_with_suffix
+    # path = Path(str(path) + '.zip')
+
+
+def convert_path_object_with_suffix(file: Union[Path, str], **kwargs) -> Path:
     """
     Ensures that file suffix is valid.
 
     If file is string it is converted to Path object
+
     If no suffix is provided it will be changed to .zip
 
     :param file:
     :return:
     """
     if isinstance(file, Path):
-        file = file
+        path = file
     elif isinstance(file, str):
-        file = Path(file)
+        path = Path(file)
     else:
         raise NotImplementedError('file format not supported')
 
     # if no suffix provided use .zip by default
-    if file.suffix not in ['.zip', '.json']:
-        file = Path(str(file) + '.zip')
-    return file
+    valid_suffixes = ['.zip', '.json']
+    if path.suffix not in valid_suffixes:
+        # if mode option is provided use it for suffix
+        mode = kwargs.pop('mode', None)
+        if mode is not None:
+            path_with_suffix = _add_suffix_with_mode(path, valid_suffixes, mode)
+        else:
+            path_with_suffix = _add_suffix_with_existing_file(path, valid_suffixes)
+    else:
+        path_with_suffix = path
+    return path_with_suffix
 
 
-def store(instance, file=None, explicit: list[str] = None, **kwargs):
+def store(instance, file, **kwargs):  #
+    path = convert_path_object_with_suffix(file, **kwargs)
+    if path.suffix in ['.zip']:
+        _store_zip(instance, path, **kwargs)
+    elif path.suffix in ['.json']:
+        _store_json(instance, path, **kwargs)
+    else:
+        raise NotImplementedError()
+    return path
+
+
+def _store_zip(instance, file=None, explicit: list[str] = None, **kwargs):
     # file = Path(file)
     # json_light, dict_large_data = create_json_from_instance(instance, explicit)
     # dict_files = {file.name + '.json': json_light}
     # store_files_to_zip(file, dict_files)
-    file = _deal_with_file(file)
-    json_light, dict_arrays = create_json_from_instance(instance, explicit, **kwargs)
+    json_light, dict_arrays = _create_json_and_array_dict(instance, explicit, **kwargs)
     if isinstance(instance, Persistent):
         dict_files = {instance._extract_file_name(file) + '.json': json_light} | {'arrays.npz': dict_arrays}
     else:
         dict_files = {file.name + '.json': json_light}
     store_files_to_zip(file, dict_files)
+
+
+def _create_pure_json(instance, **kwargs):
+    return _create_json_and_array_dict(instance=instance, len_array_separate=np.inf, **kwargs)[0]
+
+
+def _store_json(instance, file, **kwargs):
+    _json = _create_pure_json(instance, **kwargs)
+    write_string_to_file(_json, file)
 
 
 def replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays):
@@ -472,16 +524,15 @@ def replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays):
             if isinstance(v, str):
                 if v in dict_arrays.keys():
                     dict_json[k] = dict_arrays[v]
-            if isinstance(v, (dict,list)):
+            if isinstance(v, (dict, list)):
                 replace_ids_with_arrays_in_json_dict(dict_json[k], dict_arrays)
     return dict_json
 
 
 def load(file):
-    file = _deal_with_file(file)
-    assert file.suffixes[-1] == '.zip'
-    file = Path(file)
-    with zipfile.ZipFile(file, 'r') as zipped_f:
+    path = convert_path_object_with_suffix(file)
+    assert path.suffixes[-1] == '.zip'
+    with zipfile.ZipFile(path, 'r') as zipped_f:
         zi_main_json = [zi for zi in zipped_f.filelist if zi.filename.endswith('.json')]
         dict_json = json.loads(zipped_f.read(zi_main_json[0].filename), object_hook=my_decoder)
         zi_arrays = [zi for zi in zipped_f.filelist if zi.filename.endswith('.npz')]
@@ -514,9 +565,8 @@ def _replace_not_excluded_fields(old, new):
                 old.__setattr__(key, new.__getattribute__(key))
 
 
-class Mode(Enum):  # output file format
-    ZIP = 'zip'
-    JSON = 'json'
+def add_suffix_for_mode(file, mode):
+    pass
 
 
 class Persistent:  # on difference between persitable and persistent: https://wikidiff.com/persistent/persistable
@@ -524,36 +574,15 @@ class Persistent:  # on difference between persitable and persistent: https://wi
     def _extract_file_name(file: Path) -> str:
         return file.stem
 
-    def to_json(self, explicit: list[str] = None) -> str:
-        return create_json_from_instance(self, explicit=explicit, len_array_separate=np.inf)[0]
+    def to_json(self, **kwargs):
+        return _create_pure_json(self, **kwargs)
 
-    def _store_to_disk_compressed_including_single_json_file(self, file, **kwargs):
-        # todo remove uncompressed file if exists
-        store(self, file, **kwargs)
-
-    # def store_to_disk_compressed_including_separate_json_files(self, file):
-    #     dict_light, dict_heavy = create_light_and_heavy_part_from_instance(self)
-    #     json_light = json.dumps(dict_light, indent=2)
-    #
-    #     dict_files = {key: json.dumps(value, indent=2) for key, value in dict_heavy}
-    #     dict_files[self._extract_file_name(file)] = json_light
-    #     store_files_to_zip(file, dict_files)
-
-    def _store_to_disk_uncompressed_single_json_file(self, file, **kwargs):
-        json_light = self.to_json(**kwargs)
-        write_string_to_file(json_light, add_suffix(file, '.json'))
-
-    def store(self, file, mode: str | Mode = Mode.ZIP, explicit: list[str] = ()):
-        if mode in [Mode.ZIP, 'zip']:
-            self._store_to_disk_compressed_including_single_json_file(file, explicit=explicit)
-        elif mode in [Mode.JSON, 'json']:
-            self._store_to_disk_uncompressed_single_json_file(file, explicit=explicit)
-        else:
-            raise NotImplementedError()
+    def store(self, file, explicit: list[str] = (), **kwargs):
+        return store(self, file, explicit=explicit, **kwargs)
 
     @classmethod
     def _load_from_disk_uncompressed(cls, file: Path) -> T:
-        with open(str(add_suffix(file, '.json')), 'r') as data_file:
+        with open(str(may_add_suffix(file, '.json')), 'r') as data_file:
             json_string = '\n'.join(data_file.readlines())
             dict_data = json.loads(json_string, object_hook=my_decoder)
         return create_instance_from_data_dict(cls, dict_data)
@@ -565,19 +594,19 @@ class Persistent:  # on difference between persitable and persistent: https://wi
 
     @classmethod
     def load(cls: Type[T], file: Path | str) -> T:
-        file = _deal_with_file(file)
+        path = convert_path_object_with_suffix(file)
 
         # check if file exists
-        if not file.exists():
+        if not path.exists():
             raise FileNotFoundError('No file with supported type found')
 
         # depending on suffix perform loading with compressed or uncompressed mode
-        if file.suffix == '.zip':  # uncompressed case
-            return cls._load_from_disk_compressed(file)
-        elif file.suffix == '.json':  # compressed case
-            return cls._load_from_disk_uncompressed(file)
+        if str(path).endswith('.zip'):  # uncompressed case
+            return cls._load_from_disk_compressed(path)
+        elif str(path).endswith('.json'):  # compressed case
+            return cls._load_from_disk_uncompressed(path)
         else:
-            raise NotImplementedError(f'File with suffix {file.suffix} not supported.')
+            raise NotImplementedError(f'File with suffix {path.suffix} not supported.')
 
     @staticmethod
     def load_as_dict(file):
