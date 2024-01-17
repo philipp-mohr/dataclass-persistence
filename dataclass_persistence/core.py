@@ -343,7 +343,7 @@ def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
         Path.mkdir(file_path_zip.parent, parents=True)
         print('Created directory ' + str(file_path_zip.parent))
     if file_path_zip.suffix != '.zip':
-        file_path_with_dot_zip = file_path_zip.with_suffix(file_path_zip.suffix + '.zip')
+        file_path_with_dot_zip = _custom_with_suffix(file_path_zip, '.zip')
     else:
         file_path_with_dot_zip = file_path_zip
     from io import BytesIO
@@ -428,18 +428,23 @@ def _create_json_and_array_dict(instance, explicit: list[str] = None, len_array_
     json_light = replace_all(json_light, replacements)
     return json_light, dict_heavy_separate
 
+def _custom_with_suffix(path, suffix):
+    if suffix.startswith('.'):
+        return Path(str(path) + str(suffix))
+    else:
+        return Path(str(path) + '.' + str(suffix))
 
 def _add_suffix_with_mode(path, valid_suffixes, mode):
     if '.' + mode not in valid_suffixes:
         raise ValueError()
-    return path.with_suffix('.' + str(mode))
+    return _custom_with_suffix(path, mode)
 
 
 def _add_suffix_with_existing_file(path, valid_suffixes):
-    candidates = [path.with_suffix(_suffix) for _suffix in valid_suffixes]
+    candidates = [_custom_with_suffix(path, _suffix) for _suffix in valid_suffixes]
     exists = [c for c in candidates if c.exists()]
     if len(exists) == 0:
-        path_with_suffix = path.with_suffix(valid_suffixes[0])
+        path_with_suffix = _custom_with_suffix(path, valid_suffixes[0])
     else:
         path_with_suffix = exists[0]
     return path_with_suffix

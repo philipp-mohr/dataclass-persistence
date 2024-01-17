@@ -68,3 +68,29 @@ def test_complex_datatype_json():
     assert np.allclose(instance.my_array, reconstructed.my_array)
     reconstructed2 = MyClass.load("cache/test_file")
     assert np.allclose(instance.my_array, reconstructed2.my_array)
+
+
+def test_zip_json_priorities_and_filename_with_dots_zip():
+    try:
+        os.remove("cache/test_file.json")
+    except FileNotFoundError:
+        pass
+    instance = MyClass(my_array=np.array([1 + 0.5j, 2 + 0.5j, 3], dtype=np.complex128))
+    p = Path("cache/test_1.0")
+    instance.store(p, mode="json")
+    assert Path(str(p)+'.json').exists()
+
+    # if json already exists and mode not given use json
+    instance.store(p)
+    assert Path(str(p)+'.json').exists()
+
+    instance.store(p, mode="zip")
+    assert Path(str(p)+'.zip').exists()
+
+    # use zip if mode not given
+    instance.store(p)
+    assert Path(str(p)+'.zip').exists()
+
+
+
+

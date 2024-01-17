@@ -17,12 +17,12 @@ with open('README.rst') as file:
 
 # Package meta-data.
 NAME = 'dataclass-persistence'
-DESCRIPTION = 'This package enables to persist information stored in dataclasses.'
+DESCRIPTION = 'Persists information contained in dataclasses.'
 URL = 'https://github.com/philipp-mohr/dataclass-persistence'
 EMAIL = 'philipp.mohr@tuhh.de'
 AUTHOR = 'P.Mohr'
 REQUIRES_PYTHON = '>=3.10.0'
-VERSION = '0.3.1'
+VERSION = '0.3.2'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
