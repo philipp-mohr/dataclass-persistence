@@ -1,8 +1,10 @@
 import importlib
 import json
 import logging
+import pickle
 import zipfile
 from dataclasses import dataclass, is_dataclass, fields
+from datetime import datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -44,10 +46,7 @@ def write_string_to_file(data_str: str, file, b_logging: bool = True):
     :param relative_folder_path: e.g. relative_folder_path='./results/
     :return:
     """
-    path = Path(file).parent
-    if not path.exists():
-        Path.mkdir(path, parents=True)
-        print('Created directory ' + str(path))
+    create_parent_dir_if_not_exists(file)
     outfile = open(file, 'w')
     if b_logging:
         logging.info('write: ' + str(file))
@@ -142,6 +141,7 @@ Dict[str, object]]:
                                                               dict_heavy,
                                                               _field.name,
                                                               explicit)[0]
+
                 specify_type_for_special_cases(json_object, _field, value)
             else:
                 json_object[_field.name] = None
@@ -169,6 +169,8 @@ Dict[str, object]]:
         return instance, dict_heavy
     elif isinstance(instance, Enum):
         return _dataclass_to_dicts(instance.name)
+    elif isinstance(instance, datetime):
+        return _dataclass_to_dicts(instance.isoformat())
     else:
         # if type not supported, then fall back solution is to store string representation of class
         return _dataclass_to_dicts(str(instance))
@@ -233,6 +235,8 @@ def create_instance_from_data_dict(type_instance,
             return deal_with_creation_for_union_type(data_dict)
     elif isinstance(type_instance, UnionType):
         return deal_with_creation_for_union_type(data_dict)
+    elif type_instance == datetime:
+        return datetime.fromisoformat(data_dict)
     else:
         # in case of ambiguities in the type hint, the type information will be stored inside of the json file
         # the loaded type information replaces the one from the class definition.
@@ -338,10 +342,7 @@ T = TypeVar('T')
 
 
 def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
-    logging.info('write: ' + str(file_path_zip))
-    if not file_path_zip.parent.exists():
-        Path.mkdir(file_path_zip.parent, parents=True)
-        print('Created directory ' + str(file_path_zip.parent))
+    create_parent_dir_if_not_exists(file_path_zip)
     if file_path_zip.suffix != '.zip':
         file_path_with_dot_zip = _custom_with_suffix(file_path_zip, '.zip')
     else:
@@ -428,16 +429,18 @@ def _create_json_and_array_dict(instance, explicit: list[str] = None, len_array_
     json_light = replace_all(json_light, replacements)
     return json_light, dict_heavy_separate
 
+
 def _custom_with_suffix(path, suffix):
     if suffix.startswith('.'):
         return Path(str(path) + str(suffix))
     else:
         return Path(str(path) + '.' + str(suffix))
 
-def _add_suffix_with_mode(path, valid_suffixes, mode):
-    if '.' + mode not in valid_suffixes:
-        raise ValueError()
-    return _custom_with_suffix(path, mode)
+
+# def _add_suffix_with_mode(path, valid_suffixes, mode):
+#     if '.' + mode not in valid_suffixes:
+#         raise ValueError()
+#     return _custom_with_suffix(path, mode)
 
 
 def _add_suffix_with_existing_file(path, valid_suffixes):
@@ -451,7 +454,37 @@ def _add_suffix_with_existing_file(path, valid_suffixes):
     # path = Path(str(path) + '.zip')
 
 
-def convert_path_object_with_suffix(file: Union[Path, str], **kwargs) -> Path:
+# def get_modes(file, mode):
+#     # file mode decides if the file is stored in a compressed zip file
+#     # data mode decides if the class is converted into json format (with excluded numpy array) or simple pickle format
+#     file_mode, data_mode = 'zip', 'json'
+
+def _get_mode_from_file_suffix(suffix):
+    if suffix == '':
+        return 'zip_json'
+    elif suffix == '.json':
+        return 'json'
+    elif suffix == '.zip':
+        return 'zip_json'
+    elif suffix == '.pkl':
+        return 'pkl'
+    else:
+        raise ValueError()
+
+
+def _extract_compression_data_mode(mode):
+    candidates = {'zip': ('zip', 'json'),
+                  'json': (None, 'json'),
+                  'pkl': (None, 'pkl'),
+                  'zip_json': ('zip', 'json'),
+                  'zip_pkl': ('zip', 'pkl')}
+    if mode in candidates.keys():
+        return candidates[mode]
+    else:
+        raise ValueError('mode must be one of {}'.format(candidates.keys()))
+
+
+def convert_path_object_with_suffix(file: Union[Path, str], mode=None, **kwargs) -> tuple[Path, str, str]:
     """
     Ensures that file suffix is valid.
 
@@ -469,32 +502,59 @@ def convert_path_object_with_suffix(file: Union[Path, str], **kwargs) -> Path:
     else:
         raise NotImplementedError('file format not supported')
 
-    # if no suffix provided use .zip by default
-    valid_suffixes = ['.zip', '.json']
-    if path.suffix not in valid_suffixes:
-        # if mode option is provided use it for suffix
-        mode = kwargs.pop('mode', None)
-        if mode is not None:
-            path_with_suffix = _add_suffix_with_mode(path, valid_suffixes, mode)
-        else:
+
+    if mode is None:  # if mode is not provided use the suffix from file
+        valid_suffixes = ['.zip', '.json', '.pkl']
+        if path.suffix not in valid_suffixes: # look for existing files if suffix and mode are not provided
             path_with_suffix = _add_suffix_with_existing_file(path, valid_suffixes)
+        else:
+            path_with_suffix = path
+        mode = _get_mode_from_file_suffix(path_with_suffix.suffix)
+        compression, data_mode = _extract_compression_data_mode(mode)
+    else:  # if mode is provided overwrite suffix if it exists
+        compression, data_mode = _extract_compression_data_mode(mode)
+
+        if compression is None:
+            path_with_suffix = _custom_with_suffix(path, data_mode)
+        else:
+            path_with_suffix = _custom_with_suffix(path, compression)
+
+    # if no suffix provided use .zip by default
+    # valid_suffixes = ['.zip', '.json', '.pkl']
+    # if path.suffix not in valid_suffixes:
+    #     # if mode option is provided use it for suffix
+    #     if mode is not None:
+    #         path_with_suffix = _custom_with_suffix(path, '.' + fmode)
+    #     else:
+    #         path_with_suffix = _add_suffix_with_existing_file(path, valid_suffixes)
+    # else:
+    #     path_with_suffix = path
+    return path_with_suffix, compression, data_mode
+
+
+def store(instance, file, mode=None, **kwargs):  #
+    _path, _compression, _data_mode = convert_path_object_with_suffix(file, mode, **kwargs)
+    # depending on suffix perform loading with compressed or uncompressed mode
+    if _compression is None:
+        if _data_mode == 'json':
+            _store_json(instance, _path, **kwargs)
+        elif _data_mode == 'pkl':
+            _store_pkl(instance, _path, **kwargs)
+        else:
+            raise NotImplementedError(f'Data mode {_compression} not supported.')
+    elif _compression == 'zip':
+        if _data_mode == 'json':
+            _store_zip_json(instance, _path, **kwargs)
+        elif _data_mode == 'pkl':
+            _store_pkl(instance, _path, compression=_compression, **kwargs)
+        else:
+            raise NotImplementedError(f'Data mode {_compression} not supported.')
     else:
-        path_with_suffix = path
-    return path_with_suffix
+        raise NotImplementedError(f'File with suffix {_compression} not supported.')
+    return _path
 
 
-def store(instance, file, **kwargs):  #
-    path = convert_path_object_with_suffix(file, **kwargs)
-    if path.suffix in ['.zip']:
-        _store_zip(instance, path, **kwargs)
-    elif path.suffix in ['.json']:
-        _store_json(instance, path, **kwargs)
-    else:
-        raise NotImplementedError()
-    return path
-
-
-def _store_zip(instance, file=None, explicit: list[str] = None, **kwargs):
+def _store_zip_json(instance, file=None, explicit: list[str] = None, **kwargs):
     # file = Path(file)
     # json_light, dict_large_data = create_json_from_instance(instance, explicit)
     # dict_files = {file.name + '.json': json_light}
@@ -514,6 +574,23 @@ def _create_pure_json(instance, **kwargs):
 def _store_json(instance, file, **kwargs):
     _json = _create_pure_json(instance, **kwargs)
     write_string_to_file(_json, file)
+
+def create_parent_dir_if_not_exists(file):
+    logging.info('write: ' + str(file))
+    if not file.parent.exists():
+        Path.mkdir(file.parent, parents=True)
+        print('Created directory ' + str(file.parent))
+
+def _store_pkl(instance, file, compression=None,**kwargs):
+    create_parent_dir_if_not_exists(file)
+    if compression is None:
+        with open(file, 'wb') as f:
+            pickle.dump(instance, f)
+    elif compression =='zip':
+        with zipfile.ZipFile(file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zipped_f:
+            zipped_f.writestr(file.stem + '.pkl', pickle.dumps(instance))
+    else:
+        raise NotImplementedError('Unsupported compression')
 
 
 def replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays):
@@ -535,7 +612,7 @@ def replace_ids_with_arrays_in_json_dict(dict_json, dict_arrays):
 
 
 def load(file):
-    path = convert_path_object_with_suffix(file)
+    path, _, _ = convert_path_object_with_suffix(file)
     assert path.suffixes[-1] == '.zip'
     with zipfile.ZipFile(path, 'r') as zipped_f:
         zi_main_json = [zi for zi in zipped_f.filelist if zi.filename.endswith('.json')]
@@ -586,32 +663,54 @@ class Persistent:  # on difference between persitable and persistent: https://wi
         return store(self, file, explicit=explicit, **kwargs)
 
     @classmethod
-    def _load_from_disk_uncompressed(cls, file: Path) -> T:
+    def _load_from_disk_json(cls, file: Path) -> T:
         with open(str(may_add_suffix(file, '.json')), 'r') as data_file:
             json_string = '\n'.join(data_file.readlines())
             dict_data = json.loads(json_string, object_hook=my_decoder)
         return create_instance_from_data_dict(cls, dict_data)
 
     @classmethod
-    def _load_from_disk_compressed(cls, file) -> T:
+    def _load_from_disk_zip_json(cls, file) -> T:
         dict_data = load(file)
         return create_instance_from_data_dict(cls, dict_data)
 
     @classmethod
-    def load(cls: Type[T], file: Path | str) -> T:
-        path = convert_path_object_with_suffix(file)
+    def _load_from_disk_pkl(cls, file) -> T:
+        with open(file, 'rb') as f:
+            instance = pickle.load(f)
+        return instance
+
+    @classmethod
+    def _load_from_disk_zip_pkl(cls, file) -> T:
+        with zipfile.ZipFile(file, 'r') as zipped_f:
+            instance = pickle.loads(zipped_f.read(file.stem + '.pkl'))
+        return instance
+
+    @classmethod
+    def load(cls: Type[T] | 'Persistent', file: Path | str, mode=None, **kwargs) -> T:
+        _path, _compression, _data_mode = convert_path_object_with_suffix(file, mode, **kwargs)
 
         # check if file exists
-        if not path.exists():
+        if not _path.exists():
             raise FileNotFoundError('No file with supported type found')
 
         # depending on suffix perform loading with compressed or uncompressed mode
-        if str(path).endswith('.zip'):  # uncompressed case
-            return cls._load_from_disk_compressed(path)
-        elif str(path).endswith('.json'):  # compressed case
-            return cls._load_from_disk_uncompressed(path)
+        if _compression is None:
+            if _data_mode == 'json':
+                return cls._load_from_disk_json(_path)
+            elif _data_mode == 'pkl':
+                return cls._load_from_disk_pkl(_path)
+            else:
+                raise NotImplementedError(f'Data mode {_compression} not supported.')
+        elif _compression == 'zip':
+            if _data_mode == 'json':
+                return cls._load_from_disk_zip_json(_path)
+            elif _data_mode == 'pkl':
+                return cls._load_from_disk_zip_pkl(_path)
+            else:
+                raise NotImplementedError(f'Data mode {_compression} not supported.')
         else:
-            raise NotImplementedError(f'File with suffix {path.suffix} not supported.')
+            raise NotImplementedError(f'File with suffix {_compression} not supported.')
 
     @staticmethod
     def load_as_dict(file):

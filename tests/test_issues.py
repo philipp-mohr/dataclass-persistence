@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pytest import fixture
@@ -43,6 +44,24 @@ def test_2_with_mode_as_string(file_dir):
     assert t_loaded == t
 
 
+@dataclass
+class Test3(Persistent):
+    id: str
+    start_date: datetime
+
+
+def test_3_with_mode_as_string(file_dir):
+    t =Test3('0', start_date=datetime.now())
+    file = file_dir.joinpath("t3")
+    print(t)
+    t.store(file, mode='json')
+    t_loaded = t.load(file, mode='json')
+    assert t_loaded == t
+    t.store(file, mode='zip')
+    t_loaded = t.load(file, mode='zip')
+    assert t_loaded == t
+
+
 import numpy as np
 
 
@@ -78,19 +97,15 @@ def test_zip_json_priorities_and_filename_with_dots_zip():
     instance = MyClass(my_array=np.array([1 + 0.5j, 2 + 0.5j, 3], dtype=np.complex128))
     p = Path("cache/test_1.0")
     instance.store(p, mode="json")
-    assert Path(str(p)+'.json').exists()
+    assert Path(str(p) + '.json').exists()
 
     # if json already exists and mode not given use json
     instance.store(p)
-    assert Path(str(p)+'.json').exists()
+    assert Path(str(p) + '.json').exists()
 
     instance.store(p, mode="zip")
-    assert Path(str(p)+'.zip').exists()
+    assert Path(str(p) + '.zip').exists()
 
     # use zip if mode not given
     instance.store(p)
-    assert Path(str(p)+'.zip').exists()
-
-
-
-
+    assert Path(str(p) + '.zip').exists()

@@ -62,7 +62,7 @@ def file_dir():
     return Path(__file__).parent.joinpath('cache')
 
 
-@mark.parametrize("mode", ['zip', 'json'])
+@mark.parametrize("mode", ['pkl', 'json', 'zip', 'zip_json', 'zip_pkl'])
 def test_store_load_sim_data(file_dir, mode):
     sim_data = SimDataCustom(config_system=ConfigSystemCustom(conf_component=ConfigSomeComponentA()),
                              sim_points=[SimPointCustom(params={'a': 1.0},
@@ -70,7 +70,7 @@ def test_store_load_sim_data(file_dir, mode):
                                          for i in range(100)])
     file = file_dir.joinpath('some_name')
     sim_data.store(file, mode=mode)
-    sim_data_reconstructed: SimDataCustom = SimDataCustom.load(file)
+    sim_data_reconstructed: SimDataCustom = SimDataCustom.load(file, mode=mode)
 
     sim_points_rec = sim_data_reconstructed.sim_points
     sim_points = sim_data.sim_points
@@ -132,10 +132,11 @@ class Class2(Persistent):
     a: str = 'abc'
 
 
-def test_deal_with_multiple_dots_in_file_name(file_dir):
+@mark.parametrize("mode", ['pkl', 'json', 'zip', 'zip_json', 'zip_pkl'])
+def test_deal_with_multiple_dots_in_file_name(file_dir, mode):
     my = Class2()
-    my.store((_f := file_dir.joinpath('file_a=0.1_b=0.3')))
-    my_loaded = Class2.load(_f)
+    my.store((_f := file_dir.joinpath('file_a=0.1_b=0.3')), mode=mode)
+    my_loaded = Class2.load(_f, mode=mode)
     assert my == my_loaded
 
 
