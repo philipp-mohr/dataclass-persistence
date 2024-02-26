@@ -378,6 +378,19 @@ def replace_all(text, dic):
 
 
 class MyJsonEncoder(json.JSONEncoder):
+    def encode(self, obj):
+        # https://stackoverflow.com/questions/15721363/preserve-python-tuples-with-json
+        def hint_tuples(item):
+            if isinstance(item, tuple):
+                return {'__tuple__': True, 'items': item}
+            if isinstance(item, list):
+                return [hint_tuples(e) for e in item]
+            if isinstance(item, dict):
+                return {key: hint_tuples(value) for key, value in item.items()}
+            else:
+                return item
+        return super(MyJsonEncoder, self).encode(hint_tuples(obj))
+
     def default(self, obj):
         if isinstance(obj, complex):
             return {'_cplx_': str(obj)}
@@ -386,7 +399,9 @@ class MyJsonEncoder(json.JSONEncoder):
 
 
 def my_decoder(dct):
-    if '_cplx_' in dct:
+    if '__tuple__' in dct:
+        return tuple(dct['items'])
+    elif '_cplx_' in dct:
         return complex(dct['_cplx_'])
     elif 'data' and 'dtype' in dct:
         return np.array(dct['data'], dtype=dct['dtype'])

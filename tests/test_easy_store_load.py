@@ -15,3 +15,10 @@ def test_store_load_dict():
     store({'a': instance, 'b': instance}, 'cache/data')
     res = load('cache/data')
     assert np.allclose(instance, res['a'])
+
+
+def test_store_load_dict_using_cplx_or_tuples():
+    instance = {'a': 1+3j, 'b': (3, 4)}
+    store(instance, 'cache/data')
+    res = load('cache/data')
+    assert instance == res
