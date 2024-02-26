@@ -382,7 +382,7 @@ class MyJsonEncoder(json.JSONEncoder):
         # https://stackoverflow.com/questions/15721363/preserve-python-tuples-with-json
         def hint_tuples(item):
             if isinstance(item, tuple):
-                return {'__tuple__': True, 'items': item}
+                return {'__tuple__': True, 'items': [hint_tuples(_) for _ in item]}
             if isinstance(item, list):
                 return [hint_tuples(e) for e in item]
             if isinstance(item, dict):

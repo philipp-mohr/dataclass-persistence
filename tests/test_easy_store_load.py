@@ -18,7 +18,7 @@ def test_store_load_dict():
 
 
 def test_store_load_dict_using_cplx_or_tuples():
-    instance = {'a': 1+3j, 'b': (3, 4)}
+    instance = {'a': 1+3j, 'b': (3, 4), 'c': ((1,2), (3,4)), 'd': [1,3,[3,4]]}
     store(instance, 'cache/data')
     res = load('cache/data')
     assert instance == res
