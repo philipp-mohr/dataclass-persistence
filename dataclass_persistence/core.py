@@ -649,6 +649,8 @@ def _replace_not_excluded_fields(old, new):
                 _replace_not_excluded_fields(old.__getattribute__(key), new.__getattribute__(key))
         elif old.__getattribute__(key) is None:
             old.__setattr__(key, new.__getattribute__(key))
+        elif new.__getattribute__(key) is None:
+            pass
         elif hasattr(val.type, '__origin__') and val.type.__origin__ == list:
             list_old, list_new = old.__getattribute__(key), new.__getattribute__(key)
             # if list sizes do not agree, take the new list
