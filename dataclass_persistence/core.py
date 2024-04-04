@@ -309,14 +309,14 @@ class NumpyJson:
         return NumpyJson(list(array.tolist()), str(array.dtype))
 
 
-def numpy_dict_to_zip_file(file, dict_heavy):
+def numpy_dict_to_zip_file(file, dict_heavy, compresslevel=2):
     """
     https://stackoverflow.com/questions/40886234/how-to-directly-add-file-to-zip-in-python
     :param file:
     :param dict_heavy:
     :return:
     """
-    with zipfile.ZipFile(file + '.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zipped_f:
+    with zipfile.ZipFile(file + '.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as zipped_f:
         for key, value in dict_heavy.items():
             if isinstance(value, np.ndarray):
                 container = NumpyJson(dtype=str(value.dtype),
@@ -341,7 +341,7 @@ def numpy_dict_from_zip_file(file):
 T = TypeVar('T')
 
 
-def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
+def store_files_to_zip(file_path_zip, dict_files: Dict[str, str], compresslevel=2):
     create_parent_dir_if_not_exists(file_path_zip)
     if file_path_zip.suffix != '.zip':
         file_path_with_dot_zip = _custom_with_suffix(file_path_zip, '.zip')
@@ -350,7 +350,7 @@ def store_files_to_zip(file_path_zip, dict_files: Dict[str, str]):
     from io import BytesIO
     data = BytesIO()
     with zipfile.ZipFile(file_path_with_dot_zip, 'w', compression=zipfile.ZIP_DEFLATED,
-                         compresslevel=2) as zipped_f:
+                         compresslevel=compresslevel) as zipped_f:
         for key, value in dict_files.items():
             if key.endswith('npz'):
                 # https://stackoverflow.com/questions/2463770/python-in-memory-zip-library
@@ -596,13 +596,13 @@ def create_parent_dir_if_not_exists(file):
         Path.mkdir(file.parent, parents=True)
         print('Created directory ' + str(file.parent))
 
-def _store_pkl(instance, file, compression=None,**kwargs):
+def _store_pkl(instance, file, compression=None, compresslevel=2,**kwargs):
     create_parent_dir_if_not_exists(file)
     if compression is None:
         with open(file, 'wb') as f:
             pickle.dump(instance, f)
     elif compression =='zip':
-        with zipfile.ZipFile(file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zipped_f:
+        with zipfile.ZipFile(file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as zipped_f:
             zipped_f.writestr(file.stem + '.pkl', pickle.dumps(instance))
     else:
         raise NotImplementedError('Unsupported compression')
