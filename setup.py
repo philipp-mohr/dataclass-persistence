@@ -1,3 +1,7 @@
+# usage of this file:
+# in terminal with activated venc run:
+# - For local testing without upload: python setup.py local
+# - and upload to Github (Commit first, make sure to increment version counter!): python setup.py upload
 # from: https://github.com/navdeep-G/setup.py/blob/master/setup.py
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
@@ -22,7 +26,7 @@ URL = 'https://github.com/philipp-mohr/dataclass-persistence'
 EMAIL = 'philipp.mohr@tuhh.de'
 AUTHOR = 'P.Mohr'
 REQUIRES_PYTHON = '>=3.10.0'
-VERSION = '0.3.7'
+VERSION = '0.3.8'
 
 # What packages are required for this module to be executed?
 REQUIRED = [

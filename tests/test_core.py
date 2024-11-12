@@ -315,9 +315,11 @@ def test_preserve_fields_only_if_explicitly_required(file_dir, request):
     assert my_loaded.c is not None and my_loaded.c == my_loaded2.c
     assert my_loaded3.c is None
 
+
 @dataclass
 class NestedContainer(Persistent):
     a: np.ndarray = None
+
 
 @dataclass
 class MyClassLargeFields(Persistent):
@@ -368,3 +370,19 @@ class CfgWithFraction(Persistent):
 
 def test_various_field_types():
     verify_load_store(CfgWithFraction())
+
+
+@dataclass
+class ClassWithMultiDimensional(Persistent):
+    ary: np.ndarray = None
+    lst: list[int] = None
+
+
+def test_store_multi_dimensional_arrays(request, file_dir):
+    len_array_separate = 1000
+    for size in [999, 1001]:
+        a = ClassWithMultiDimensional(ary=np.arange(1, size)[np.newaxis, :],
+                                      lst=list(range(size)))
+        a.store((f := file_dir.joinpath(request.node.name)), len_array_separate=len_array_separate)
+        b = ClassWithMultiDimensional.load(f)
+        assert np.all(a.ary == b.ary)

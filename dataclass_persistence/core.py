@@ -433,10 +433,16 @@ def may_add_suffix(file, suffix):
 
 
 def _create_json_and_array_dict(instance, explicit: list[str] = None, len_array_separate=1000, **kwargs):
+    def _len(item):
+        if isinstance(item, np.ndarray):
+            return item.size
+        else:
+            return len(item)
+
     explicit = () if explicit is None else tuple(explicit)
     dict_light, dict_heavy = dataclass_to_dicts(instance, explicit=explicit)
-    dict_heavy_json = {k: v for k, v in dict_heavy.items() if len(v) < len_array_separate}
-    dict_heavy_separate = {k: v for k, v in dict_heavy.items() if len(v) >= len_array_separate}
+    dict_heavy_json = {k: v for k, v in dict_heavy.items() if _len(v) < len_array_separate}
+    dict_heavy_separate = {k: v for k, v in dict_heavy.items() if _len(v) >= len_array_separate}
 
     json_light = json.dumps(dict_light, indent=2, cls=MyJsonEncoder)
     replacements = {'"{}"'.format(key): json.dumps(NumpyJson.from_array(array=value).__dict__, cls=MyJsonEncoder)
@@ -517,10 +523,9 @@ def convert_path_object_with_suffix(file: Union[Path, str], mode=None, **kwargs)
     else:
         raise NotImplementedError('file format not supported')
 
-
     if mode is None:  # if mode is not provided use the suffix from file
         valid_suffixes = ['.zip', '.json', '.pkl']
-        if path.suffix not in valid_suffixes: # look for existing files if suffix and mode are not provided
+        if path.suffix not in valid_suffixes:  # look for existing files if suffix and mode are not provided
             path_with_suffix = _add_suffix_with_existing_file(path, valid_suffixes)
         else:
             path_with_suffix = path
@@ -590,18 +595,20 @@ def _store_json(instance, file, **kwargs):
     _json = _create_pure_json(instance, **kwargs)
     write_string_to_file(_json, file)
 
+
 def create_parent_dir_if_not_exists(file):
     logging.info('write: ' + str(file))
     if not file.parent.exists():
         Path.mkdir(file.parent, parents=True)
         print('Created directory ' + str(file.parent))
 
-def _store_pkl(instance, file, compression=None, compresslevel=2,**kwargs):
+
+def _store_pkl(instance, file, compression=None, compresslevel=2, **kwargs):
     create_parent_dir_if_not_exists(file)
     if compression is None:
         with open(file, 'wb') as f:
             pickle.dump(instance, f)
-    elif compression =='zip':
+    elif compression == 'zip':
         with zipfile.ZipFile(file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as zipped_f:
             zipped_f.writestr(file.stem + '.pkl', pickle.dumps(instance))
     else:
